@@ -1,0 +1,61 @@
+# Local SDK and JDK installations
+/tools/android-sdk/
+/tools/jdk*/
+/tools/*jdk*/
+/tools/*sdk*/
+
+# Build outputs and local state
+**/build/
+*.apk
+*.aab
+*.class
+*.dex
+*.idsig
+/.local/
+/.gradle/
+.idea/
+.vscode/
+*.iml
+.project
+.classpath
+.settings/
+local.properties
+device-state-*.json
+adbkey*
+
+# Signing keys, passwords, tokens, and environment secrets
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+signing-password*.txt
+tmdb-token.txt
+.env
+.env.*
+!.env.example
+
+# Screenshots, captures, recordings, and temporary output
+**/screenshots/
+**/captures/
+**/*screenshot*
+**/*screen-shot*
+**/*screen_capture*
+**/*screen-capture*
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.tmp
+*.temp
+*.log
+*.bak
+*~
+
+# Local/editor/OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.user
+*.suo

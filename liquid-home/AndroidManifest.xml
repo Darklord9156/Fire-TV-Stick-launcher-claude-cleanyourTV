@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="tv.rajra.liquidhome">
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" android:maxSdkVersion="27" />
+    <uses-permission android:name="android.permission.REORDER_TASKS" android:maxSdkVersion="27" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" android:maxSdkVersion="27" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <application android:label="Liquid Home" android:icon="@drawable/launcher_icon" android:banner="@drawable/launcher_banner" android:theme="@style/AppTheme" android:allowBackup="false" android:supportsRtl="true">
+        <activity android:name=".Home" android:exported="true" android:label="Liquid Home" android:launchMode="singleTask" android:screenOrientation="landscape" android:windowSoftInputMode="adjustResize" android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.HOME" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LEANBACK_LAUNCHER" /></intent-filter>
+        </activity>
+        <service android:name=".Keeper" android:exported="false" />
+        <receiver android:name=".BootReceiver" android:exported="true"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.QUICKBOOT_POWERON" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter></receiver>
+    </application>
+</manifest>
