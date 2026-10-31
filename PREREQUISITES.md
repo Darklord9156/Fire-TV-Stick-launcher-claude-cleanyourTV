@@ -65,18 +65,33 @@ The normal setup path does not download anything when a compatible JDK and all r
 
 ## Signing credentials
 
-The build expects these local files:
+The build has separate developer and release signing modes.
 
-```text
-liquid-home/liquid-home.keystore
-.local/signing-password.txt
+### Developer builds
+
+The normal command (`.\liquid-home\build.ps1`) keeps the existing local workflow. It uses `liquid-home/liquid-home.keystore` and `.local/signing-password.txt`, generating a developer-local key and random password file if needed. The developer password is stored in that ignored local file as plaintext and is also passed to signing tools in command-line arguments. This is for local development convenience, not production release signing. Release builds use a separate secure password-prompt workflow. Do not reuse your release keystore password as the developer signing password, and do not reuse the automatically generated developer key as the public release identity.
+
+### Release builds
+
+Create a dedicated release keystore once, using a trusted JDK `keytool`, and store it outside the project directory. Run this command yourself when ready; `keytool` prompts for passwords instead of putting them in the command:
+
+```powershell
+keytool -genkeypair -v -keystore "D:\Secure\LiquidHome-release.jks" -alias liquid-home -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-If the keystore is absent, the first build generates a local signing key and, when needed, a random password file. If a keystore exists but the password file is missing, the build stops. The current script reads the password from the file and uses it for both keystore and key password; provide a compatible keystore/key with matching credentials. The files are ignored by `.gitignore`, but that does not replace checking the staged/public files before release.
+Keep an encrypted backup in a separate secure location. Do not commit it, put it in the project, or upload it to GitHub. No release keystore is provided by this repository, and the release build never generates one.
 
-For a developer's own build, create or provide a private keystore locally at the expected path and save the matching password in `.local/signing-password.txt` with access restricted to that developer's account. Do not put passwords in source control, docs, shell history, shared logs, or command-line arguments. Back up the keystore and password securely and separately from this working tree.
+Build a release APK by providing the existing external keystore and its alias:
 
-Android only accepts an update signed with a certificate compatible with the installed app. A newly generated local key will not update an installation signed by somebody else's key. Do not publish a private signing key; define a separate release-signing and update-distribution process before distributing APKs to other users. No shared public release-signing process is defined in this project yet.
+```powershell
+.\liquid-home\build.ps1 -Release -ReleaseKeystorePath "D:\Secure\LiquidHome-release.jks" -ReleaseAlias "liquid-home" -DisplayName "Alex"
+```
+
+The release command removes the old final APK at the start, signs to a unique temporary APK in the build directory, verifies that temporary APK and its certificate, then atomically renames the verified file to `liquid-home/build/liquid-home.apk`. On ordinary signing or verification failure, it removes the temporary and final APK outputs while preserving unrelated build files. Forced termination can bypass cleanup and leave a temporary APK or a still-running signer child; the final APK remains unpublished until verification succeeds.
+
+The script prompts for the keystore password and the private-key password using secure, non-echoing prompts. It passes them to `apksigner` through unique temporary process environment variables, then removes those variables immediately after the signer exits, before verification. It also frees temporary unmanaged buffers and disposes the secure prompt values, with `finally` cleanup as a fallback. Passwords are not placed in command arguments or release password files. Forced termination of PowerShell or the machine can bypass in-process cleanup; a still-running signer child may retain its inherited environment until it exits. The alias defaults to `liquid-home`; set `-ReleaseAlias` if your keystore uses a different alias.
+
+Keep the same release keystore, alias, and access to the signing key for every published update. Android requires an update to use a compatible signing certificate; losing or replacing the release key prevents normal updates to installations signed by it. Keep the keystore and encrypted backups outside the project in separate protected locations, and protect its passwords with a password manager. Never store the keystore or passwords in the repository, GitHub, source-control history, or shared logs. The script rejects keystore paths inside the Git repository, including paths resolved through directory junctions or symbolic links.
 
 ## Build, install, verify, and test
 

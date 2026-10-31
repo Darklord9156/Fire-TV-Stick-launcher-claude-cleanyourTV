@@ -102,7 +102,15 @@ Set up the toolchain and build:
 .\liquid-home\build.ps1 -DisplayName "Alex"
 ```
 
-The display name is optional; it sets the first-use greeting default. The build script writes the APK to `liquid-home/build/liquid-home.apk` and signs it with a developer-local key. A newly generated key cannot update an installation signed by a different key. Keep your keystore and its password private; they are not included in the repository.
+The display name is optional; it sets the first-use greeting default. The build script writes the APK to `liquid-home/build/liquid-home.apk` and signs it with a developer-local key. This key is for local development; it is not the persistent key for public releases.
+
+For a public release, create and securely back up a dedicated release keystore outside the repository. Do not commit or upload it. Pass its path and alias with `-Release`; the script prompts for the keystore and key passwords without echoing them:
+
+```powershell
+.\liquid-home\build.ps1 -Release -ReleaseKeystorePath "D:\Secure\LiquidHome-release.jks" -ReleaseAlias "liquid-home" -DisplayName "Alex"
+```
+
+Release signing invalidates any previous final APK, signs to a unique temporary APK, verifies it, then moves the verified file to `liquid-home/build/liquid-home.apk`. Passwords are supplied to `apksigner` through unique temporary process environment variables and cleared as soon as signing exits, before verification. Forced termination of PowerShell or the machine may bypass in-process cleanup; a temporary APK or a still-running signer child may remain. Keep the release keystore and encrypted backups outside the project in separate protected locations, and retain the same key for every update: Android will reject an update signed with a different key. See [Prerequisites](PREREQUISITES.md#signing-credentials) for details.
 
 To verify a built APK, run:
 
@@ -146,7 +154,7 @@ It runs source-pattern checks, PowerShell parser checks, and Java loopback tests
 - Only one Fire TV has been manually exercised; broader device compatibility is unknown.
 - Phone/browser wallpaper transfer uses local HTTP without TLS. Use a trusted network and keep the temporary upload URL private.
 - The repository does not establish redistribution permission for its bundled wallpaper and logo artwork. Those permissions remain to be reviewed before redistributing the assets.
-- There is no shared release-signing process. A developer's local signing key is not suitable for publishing updates to every user's installation.
+- Release signing requires a developer-managed external keystore; none is included in the repository. Protect and back up that key because future updates must use the same signing identity.
 
 ## Contributing
 
