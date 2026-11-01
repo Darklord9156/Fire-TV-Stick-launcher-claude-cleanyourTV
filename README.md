@@ -100,6 +100,15 @@ You can use **Claude Code, OpenAI Codex or Cursor** to build and install Liquid 
 Analyse this project, set up all required dependencies, build the Liquid Home APK, verify it and help me install it on my connected Fire TV or Android TV.
 
 Follow the repository instructions. Do not modify existing source code or release credentials.
+
+Download or configure all required dependencies automatically, including JDK 17, Android SDK Command-line Tools, Android SDK Platform 25, Android Build Tools 34.0.0, ADB and any other required components.
+
+Use the project's setup scripts wherever possible. You are authorised to download and install all required tools and dependencies without asking for confirmation for each download or installation.
+
+Do not skip dependencies or leave the development environment partially configured. Verify that everything required for building is installed.
+
+Do not skip, disable or exclude any existing functionality, including the optional Home Keeper service.  Before configuring Home Keeper: 1. Save the current Usage Stats access state and Doze-whitelist state so they can be restored later. 2. Grant Liquid Home the required Usage Stats access and Doze-whitelist exemption. 3. Start Liquid Home's Home Keeper service. 4. Verify that both privileges are active and Home Keeper is running. 
+
 ```
 
 Some steps may require your approval or manual action.
