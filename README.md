@@ -99,7 +99,7 @@ You can use **Claude Code, OpenAI Codex or Cursor** to build and install Liquid 
 ```text
 Analyse this project, set up all required dependencies, build the Liquid Home APK and install it on my connected Fire TV or Android TV. Do not check Fire TV, Android API or any other compatibility.
 
-Follow the repository instructions. Do not modify existing source code or release credentials.
+Follow the repository instructions. Do not modify existing functionality except where necessary to implement the requested app-visibility exclusions. Never expose or overwrite release credentials.
 
 Download or configure all required dependencies automatically, including JDK 17, Android SDK Command-line Tools, Android SDK Platform 25, Android Build Tools 34.0.0, ADB and any other required components.
 
@@ -108,6 +108,8 @@ Use the project's setup scripts wherever possible. You are authorised to downloa
 Do not skip dependencies or leave the development environment partially configured. Verify that everything required for building is installed.
 
 Do not skip, disable or exclude any existing functionality, including the optional Home Keeper service.  Before configuring Home Keeper: 1. Save the current Usage Stats access state and Doze-whitelist state so they can be restored later. 2. Grant Liquid Home the required Usage Stats access and Doze-whitelist exemption. 3. Start Liquid Home's Home Keeper service. 4. Verify that both privileges are active and Home Keeper is running. 
+
+Before building the APK: 2. Retrieve a complete list of installed, launchable applications, including system apps and preinstalled apps. 3. Display each application's name and package name, clearly identifying system apps and user-installed apps. 4. Ask me which applications I want hidden from Liquid Home. 5. Allow me to select multiple applications. 6. Save my selections in a persistent app-visibility exclusion list. 7. Apply these selections when building the APK. Important: - Hide selected applications only from Liquid Home's launcher listings. - Never uninstall, disable or modify the actual Android or Fire TV packages.
 
 ```
 
