@@ -1,6 +1,6 @@
-# Liquid Home
+# Fire TV Stick Launcher
 
-**A remote-friendly Android TV launcher project for Fire TV.** Liquid Home organizes installed apps, lets you choose a home-screen background, and includes optional catalog search and device personalization.
+Liquid Home is a customizable Fire TV Stick launcher for Amazon Fire TV, featuring a six-app home row, All Apps, custom QR wallpaper uploads, dynamic backgrounds and Wi-Fi/Bluetooth shortcuts.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Android API 25](https://img.shields.io/badge/Android%20API-25-green.svg)](#compatibility)
