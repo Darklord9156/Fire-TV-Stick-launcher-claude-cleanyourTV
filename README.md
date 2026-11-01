@@ -91,14 +91,15 @@ See [Troubleshooting](docs/TROUBLESHOOTING.md) for ADB, signing, installation, a
 
 You can use **Claude Code, OpenAI Codex or Cursor** to build and install Liquid Home without manually handling the development setup.
 
-1. Clone or download this repository.
-2. Open the project folder in your AI coding assistant.
-3. Ask it to analyse the project, install required dependencies, build the APK and install it on your connected TV.
+1. Copy and paste this GitHub repository URL into your AI coding assistant, or clone/download the repository and open the project folder.
+2. Ask the AI assistant to analyse the project, install required dependencies, build the APK and help install it on your connected TV.
 
 **Suggested prompt:**
 
 ```text
-Analyse this project, set up all required dependencies, build the Liquid Home APK, verify it and help me install it on my connected Fire TV or Android TV. Follow the repository instructions and do not modify existing source code or release credentials.
+Analyse this project, set up all required dependencies, build the Liquid Home APK, verify it and help me install it on my connected Fire TV or Android TV.
+
+Follow the repository instructions. Do not modify existing source code or release credentials.
 ```
 
 Some steps may require your approval or manual action.
@@ -178,8 +179,7 @@ It runs source-pattern checks, PowerShell parser checks, and Java loopback tests
 - Only one Fire TV has been manually exercised; broader device compatibility is unknown.
 - Phone/browser wallpaper transfer uses local HTTP without TLS. Use a trusted network and keep the temporary upload URL private.
 - Existing installations migrate the saved selection for the former built-in wallpaper to the current built-in image automatically.
-- `liquid-home/res/drawable-nodpi/tmdb_logo.png` is custom artwork created by the project author. The Credits section retains the notice: “This product uses the TMDB API but is not endorsed or certified by TMDB.” TMDB's published guidance separately calls for an approved logo; this custom artwork is not represented as officially approved. See [TMDB attribution guidance](https://developer.themoviedb.org/docs/faq).
-- Release signing requires a developer-managed external keystore; none is included in the repository. Protect and back up that key because future updates must use the same signing identity.
+- Release signing requires a developer-managed external keystore; none is included in the repository.
 
 ## Contributing
 
