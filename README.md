@@ -45,7 +45,7 @@ These screenshots were captured from Liquid Home running on a Fire TV.
 | Target SDK | API 25 |
 | Launcher intents | Android HOME and Leanback launcher |
 | Intended device | Fire TV |
-| Verified compatibility | One Fire TV was manually exercised; the tested model and Fire OS version are not documented here. |
+| Verified compatibility | One Fire TV was manually exercised; Tested on Amazon Fire TV Stick 4K (1st Generation, AFTMM) running Fire OS 6. |
 | Other devices | Compatibility across other Fire TV models, Fire OS versions, and Android TV devices has not been established. |
 
 The manifest marks the Leanback feature as optional. That declaration does not establish compatibility with every Android TV device. The installation script specifically identifies Fire TV devices.
