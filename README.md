@@ -87,6 +87,24 @@ The installer saves device settings used by the optional Keeper workflow. To sto
 
 See [Troubleshooting](docs/TROUBLESHOOTING.md) for ADB, signing, installation, and recovery guidance.
 
+# Fire TV debloat
+
+`debloat.ps1` reversibly disables a small, explicit list of Amazon packages for user 0. It does not uninstall packages, disable Amazon Home, or change firmware-update settings. The list includes `com.amazon.logan` (VoiceView) and optional user-facing apps such as Photos, Game Hub, miniTV, and Shopping; those features will stop working while their packages are disabled. `com.amazon.sneakpeek` is included but is left as-is when already disabled.
+
+Before making changes, the script saves installed and disabled package lists, device properties, the global/secure/system settings tables, and the original state of each listed package under the ignored `.local/debloat/` folder. It applies changes in batches of three and checks package-manager state after each batch.
+
+```powershell
+.\debloat.ps1 -TvIp "192.168.1.7"
+```
+
+The script prints the generated backup folder and a matching restore command. Restore using that exact folder so the script returns each package to its pre-debloat enabled/disabled state:
+
+```powershell
+.\restore-debloat.ps1 -TvIp "192.168.1.7" -BackupPath ".local\debloat\AFTMM_192_168_1_7_<timestamp>"
+```
+
+Packages absent from the TV are skipped. A package Amazon protects may remain enabled; the script reports and records the result instead of uninstalling it. Keep the `.local/debloat/` backup until you no longer need to restore the device.
+
 ## Build & Install Using AI
 
 You can use **Claude Code, OpenAI Codex or Cursor** to build and install Liquid Home without manually handling the development setup.
