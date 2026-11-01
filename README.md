@@ -194,7 +194,7 @@ It runs source-pattern checks, PowerShell parser checks, and Java loopback tests
 
 Contributions are welcome. Before opening a pull request, describe the change and how you checked it, including device and Fire OS details when relevant. Keep signing files, ADB keys, device snapshots, API tokens, and private network details out of commits and issue reports. Do not report tests as passing unless you ran them and confirmed the result.
 
-#Related
+# Related
 
 Built in the spirit of [CleanYourTV](https://github.com/Gathin23/cleanyourtv), which does the same for Android TV and Google TV sets.
 
