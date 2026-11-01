@@ -93,14 +93,15 @@ public final class Home extends Activity {
         "com.sonyliv", "com.apple.atve.amazon.appletv", "com.nuvio.tv", "com.stremio.one"
     };
     private static final String[] FOCUS_EFFECT_COLOR_NAMES = {
-        "Doctor Doom Green", "Magenta Pink", "Midnight Blue", "Royal Purple", "Crimson Red",
+        "Emerald Green", "Magenta Pink", "Midnight Blue", "Royal Purple", "Crimson Red",
         "Burnt Orange", "Teal", "Lime Green", "Slate Grey", "Antique Gold"
     };
     private static final int[] FOCUS_EFFECT_COLORS = {
         0xFF00651E, 0xFF8A0054, 0xFF03309B, 0xFF4B1593, 0xFF970009,
         0xFFA43900, 0xFF006565, 0xFF4B8100, 0xFF424B54, 0xFF8E6100
     };
-    private static final String BUILTIN = "doom.jpg";
+    private static final String BUILTIN = "builtin";
+    private static final String LEGACY_BUILTIN_WALLPAPER = "doom.jpg";
     private static final int REQUEST_ADD_WALLPAPER = 7301;
     private static final int REQUEST_UNINSTALL_APP = 7303;
     private static final int HOME_APPS_COLUMNS = 6;
@@ -1725,7 +1726,7 @@ public final class Home extends Activity {
             item.setNextFocusRightId(right);
         }
         scroll.addView(strip); column.addView(scroll, new LinearLayout.LayoutParams(MATCH, WRAP));
-        String selectedWallpaper = prefs.getString("wallpaper", BUILTIN);
+        String selectedWallpaper = selectedWallpaper();
         if (!BUILTIN.equalsIgnoreCase(selectedWallpaper)
                 && new File(wallpaperDir(), selectedWallpaper).isFile()) {
             addAction(column, "Delete selected wallpaper", "Remove " + selectedWallpaper + " from this Fire TV", "×",
@@ -1735,7 +1736,7 @@ public final class Home extends Activity {
         note.setLineSpacing(dp(4), 1); LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(dp(900), WRAP); noteLp.topMargin = dp(12); column.addView(note, noteLp);
         pageHost.addView(column, new LinearLayout.LayoutParams(MATCH, MATCH));
         defaultWallpaper.setTag(BUILTIN);
-        String selected = prefs.getString("wallpaper", BUILTIN);
+        String selected = selectedWallpaper();
         column.post(() -> {
             for (int i = 0; i < strip.getChildCount(); i++) {
                 View candidate = strip.getChildAt(i);
@@ -1757,7 +1758,7 @@ public final class Home extends Activity {
         TextView detail = text(subtitle, 12, 0xCFFFFFFF, Typeface.create("sans-serif-light", 0));
         labels.addView(name); LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(WRAP, WRAP); dlp.topMargin = dp(5); labels.addView(detail, dlp);
         row.addView(labels, new LinearLayout.LayoutParams(0, WRAP, 1)); card.addView(row, new FrameLayout.LayoutParams(MATCH, MATCH));
-        card.setActive(file.equalsIgnoreCase(prefs.getString("wallpaper", BUILTIN))); return card;
+        card.setActive(file.equalsIgnoreCase(selectedWallpaper())); return card;
     }
 
     private void addAction(LinearLayout list, String title, String detail, String glyph, Runnable onClick) {
@@ -2119,7 +2120,7 @@ public final class Home extends Activity {
                             Toast.makeText(this, "Could not delete that wallpaper", Toast.LENGTH_LONG).show();
                             return;
                         }
-                        if (filename.equals(prefs.getString("wallpaper", BUILTIN))) {
+                        if (filename.equals(selectedWallpaper())) {
                             prefs.edit().putString("wallpaper", BUILTIN).apply();
                             setWallpaper();
                         }
@@ -2185,7 +2186,7 @@ public final class Home extends Activity {
 
     private void setWallpaper() {
         if (wallpaperView == null) return;
-        String file = prefs == null ? BUILTIN : prefs.getString("wallpaper", BUILTIN);
+        String file = selectedWallpaper();
         File chosen = new File(wallpaperDir(), file);
         boolean custom = !BUILTIN.equalsIgnoreCase(file) && chosen.isFile();
         String renderKey = BUILTIN;
@@ -2271,6 +2272,16 @@ public final class Home extends Activity {
         if (dir == null) dir = new File(getFilesDir(), "wallpapers");
         if (!dir.exists()) dir.mkdirs();
         return dir;
+    }
+
+    private String selectedWallpaper() {
+        if (prefs == null) return BUILTIN;
+        String selected = prefs.getString("wallpaper", BUILTIN);
+        if (LEGACY_BUILTIN_WALLPAPER.equalsIgnoreCase(selected)) {
+            prefs.edit().putString("wallpaper", BUILTIN).apply();
+            return BUILTIN;
+        }
+        return selected;
     }
 
     private boolean isImage(File file) {

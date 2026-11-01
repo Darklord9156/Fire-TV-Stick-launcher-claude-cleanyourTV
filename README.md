@@ -5,8 +5,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Android API 25](https://img.shields.io/badge/Android%20API-25-green.svg)](#compatibility)
 
-> **Current build warning:** this checkout has a known source/resource mismatch. `Home.java` refers to `R.drawable.tmdb_logo`, but the corresponding drawable is absent from `liquid-home/res/`. A clean build is expected to fail until that mismatch is resolved. No APK is provided here.
-
 ## About the project
 
 Liquid Home is a Java launcher with Android HOME and Leanback launcher entry points. It is intended for use with a TV remote: the home screen has an app row, an All Apps view, and pages for search and settings.
@@ -16,7 +14,7 @@ The project may interest Fire TV owners who want to explore an alternative launc
 ## Features
 
 - **App organization:** browse launchable installed apps, move apps between All Apps and a six-item Main Row, and reorder the Main Row with the remote.
-- **Backgrounds:** select the built-in background or custom images. Transfer images from a phone/browser over the local network, or copy images from a computer to the TV with ADB.
+- **Backgrounds:** select the built-in background or custom images. The built-in `R.drawable.doom` resource is generated from the project-author-supplied `wallpapers/dooom.png`. Transfer images from a phone/browser over the local network, or copy images from a computer to the TV with ADB.
 - **Optional catalog search:** search TMDB for movies, television, and people. Search requires an internet connection and a user-provided TMDB API Read Access Token, which the app encrypts on the device.
 - **Personalization:** set the greeting name and select a focus-effect color in Settings.
 - **Fire TV shortcuts:** open Fire TV settings or return to Amazon Home from the app.
@@ -58,7 +56,7 @@ The manifest marks the Leanback feature as optional. That declaration does not e
 
 ## Installation on Fire TV
 
-Installation is performed from Windows PowerShell using the project scripts. Review [Prerequisites](PREREQUISITES.md) before starting. The current clean-checkout build limitation above must be resolved before installation can succeed.
+Installation is performed from Windows PowerShell using the project scripts. Review [Prerequisites](PREREQUISITES.md) before starting.
 
 1. On Fire TV, enable **ADB Debugging** in **Settings → My Fire TV → Developer Options**. If Developer Options are hidden, open **About**, highlight the device name, and press Select seven times; menu wording varies by firmware.
 2. Connect the computer and TV to the same network, wake the TV, and find its current IPv4 address.
@@ -118,8 +116,6 @@ To verify a built APK, run:
 .\verify.ps1 -ExpectedDisplayName "Alex"
 ```
 
-**The current checkout is expected to fail during a clean build** because of the missing `tmdb_logo` resource described above. These commands document the intended workflow; they are not a claim that the current build succeeds.
-
 ## Project structure
 
 | Path | Purpose |
@@ -149,11 +145,11 @@ It runs source-pattern checks, PowerShell parser checks, and Java loopback tests
 
 ## Known limitations
 
-- A clean build is expected to fail while the `tmdb_logo` source/resource mismatch remains unresolved.
 - Physical Home-button routing is controlled by Fire OS. Home Keeper is optional, firmware-dependent, and best-effort.
 - Only one Fire TV has been manually exercised; broader device compatibility is unknown.
 - Phone/browser wallpaper transfer uses local HTTP without TLS. Use a trusted network and keep the temporary upload URL private.
-- The repository does not establish redistribution permission for its bundled wallpaper and logo artwork. Those permissions remain to be reviewed before redistributing the assets.
+- Existing installations migrate the saved selection for the former built-in wallpaper to the current built-in image automatically.
+- `liquid-home/res/drawable-nodpi/tmdb_logo.png` is custom artwork created by the project author. The Credits section retains the notice: “This product uses the TMDB API but is not endorsed or certified by TMDB.” TMDB's published guidance separately calls for an approved logo; this custom artwork is not represented as officially approved. See [TMDB attribution guidance](https://developer.themoviedb.org/docs/faq).
 - Release signing requires a developer-managed external keystore; none is included in the repository. Protect and back up that key because future updates must use the same signing identity.
 
 ## Contributing

@@ -6,7 +6,7 @@ if (-not [System.Net.IPAddress]::TryParse($TvIp, [ref]$ipAddress) -or $ipAddress
 $Serial="$TvIp`:5555"; $Adb=Join-Path $Root 'tools\android-sdk\platform-tools\adb.exe'
 if (-not (Test-Path $Adb)) { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'setup-tools.ps1'); if ($LASTEXITCODE -ne 0) { throw 'Could not set up ADB.' } }
 $Folder=Join-Path $Root 'wallpapers'
-$Images=@(Get-ChildItem -LiteralPath $Folder -File | Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|webp)$' })
+$Images=@(Get-ChildItem -LiteralPath $Folder -File | Where-Object { $_.Name -ine 'dooom.png' -and $_.Extension -match '^\.(jpg|jpeg|png|webp)$' })
 if (-not $Images) { throw "Add JPG, JPEG, PNG, or WebP images to $Folder first." }
 & $Adb start-server | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'Could not start ADB.' }

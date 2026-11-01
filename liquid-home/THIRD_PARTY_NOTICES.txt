@@ -26,3 +26,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Bundled artwork and branding
+----------------------------
+
+wallpapers/dooom.png is artwork supplied and identified by the project author
+and is used as the built-in wallpaper. It is not covered by the project's MIT
+license. The project author created the custom artwork at
+liquid-home/res/drawable-nodpi/tmdb_logo.png. It is retained in the app's
+Credits section alongside the notice: "This product uses the TMDB API but is
+not endorsed or certified by TMDB." The custom logo is not represented as an
+officially approved TMDB mark and is not covered by the project's MIT license.
+TMDB's published guidance requests an approved logo; this remains a separate
+branding-policy consideration for distribution.
+
+TMDB attribution guidance:
+https://developer.themoviedb.org/docs/faq

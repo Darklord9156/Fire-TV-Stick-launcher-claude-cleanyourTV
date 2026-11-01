@@ -10,7 +10,7 @@ $Required = @(
     'liquid-home\build.ps1',
     'liquid-home\src\tv\rajra\liquidhome\Home.java',
     'liquid-home\res',
-    'wallpapers\doom.jpg',
+    'wallpapers\dooom.png',
     'tools\android-sdk\platforms\android-25\android.jar',
     'tools\android-sdk\build-tools\34.0.0\apksigner.bat',
     'tools\android-sdk\build-tools\34.0.0\aapt.exe'
@@ -33,7 +33,8 @@ if ($LASTEXITCODE -ne 0 -or ($badging | Out-String) -notmatch "package: name='tv
 $resources = & $Aapt dump --values resources $Apk 2>&1
 $resourceDump = $resources | Out-String
 if ($LASTEXITCODE -ne 0 -or $resourceDump -notmatch 'configured_display_name') { throw 'APK is missing its generated greeting configuration resource.' }
-if ($resourceDump -notmatch 'drawable/doom') { throw 'APK is missing the default Doom wallpaper resource.' }
+if ($resourceDump -notmatch 'drawable/doom') { throw 'APK is missing the built-in wallpaper resource.' }
+if ($resourceDump -notmatch 'drawable/tmdb_logo') { throw 'APK is missing the TMDB logo resource.' }
 if (-not [string]::IsNullOrWhiteSpace($ExpectedDisplayName)) {
     $escaped = [System.Security.SecurityElement]::Escape($ExpectedDisplayName.Trim())
     if ($resourceDump -notmatch [regex]::Escape($escaped)) { throw 'APK greeting configuration does not match the requested display name.' }
@@ -41,7 +42,7 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedDisplayName)) {
 
 $apkTime = (Get-Item -LiteralPath $Apk).LastWriteTimeUtc
 $inputs = @((Join-Path $Root 'liquid-home\AndroidManifest.xml'),(Join-Path $Root 'liquid-home\build.ps1'))
-$inputs += (Join-Path $Root 'wallpapers\doom.jpg')
+$inputs += (Join-Path $Root 'wallpapers\dooom.png')
 $inputs += @(Get-ChildItem -LiteralPath (Join-Path $Root 'liquid-home\src') -File -Recurse | ForEach-Object FullName)
 $inputs += @(Get-ChildItem -LiteralPath (Join-Path $Root 'liquid-home\res') -File -Recurse | ForEach-Object FullName)
 $newestInput = ($inputs | ForEach-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc } | Measure-Object -Maximum).Maximum

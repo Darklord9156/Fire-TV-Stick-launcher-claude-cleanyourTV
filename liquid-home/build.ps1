@@ -229,11 +229,11 @@ Get-ChildItem -LiteralPath $Work -Force | Remove-Item -Force -Recurse
 $BuildResources = Join-Path $Work 'resources'
 New-Item -ItemType Directory -Force -Path $BuildResources | Out-Null
 Get-ChildItem -LiteralPath (Join-Path $Root 'res') -Force | Copy-Item -Destination $BuildResources -Recurse -Force
-$DefaultWallpaper = Join-Path $Final 'wallpapers\doom.jpg'
+$DefaultWallpaper = Join-Path $Final 'wallpapers\dooom.png'
 if (-not (Test-Path -LiteralPath $DefaultWallpaper)) { throw "Default wallpaper is missing: $DefaultWallpaper" }
 $DrawableResources = Join-Path $BuildResources 'drawable-nodpi'
 New-Item -ItemType Directory -Force -Path $DrawableResources | Out-Null
-Copy-Item -LiteralPath $DefaultWallpaper -Destination (Join-Path $DrawableResources 'doom.jpg') -Force
+Copy-Item -LiteralPath $DefaultWallpaper -Destination (Join-Path $DrawableResources 'doom.png') -Force
 $Values = Join-Path $BuildResources 'values'
 New-Item -ItemType Directory -Force -Path $Values | Out-Null
 $EscapedName = [System.Security.SecurityElement]::Escape($DisplayName.Trim())
