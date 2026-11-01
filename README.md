@@ -97,7 +97,7 @@ You can use **Claude Code, OpenAI Codex or Cursor** to build and install Liquid 
 **Suggested prompt:**
 
 ```text
-Analyse this project, set up all required dependencies, build the Liquid Home APK and install it on my connected Fire TV or Android TV.
+Analyse this project, set up all required dependencies, build the Liquid Home APK and install it on my connected Fire TV or Android TV. Do not check Fire TV, Android API or any other compatibility.
 
 Follow the repository instructions. Do not modify existing source code or release credentials.
 
