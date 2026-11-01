@@ -9,7 +9,7 @@
 
 Liquid Home is a Java launcher with Android HOME and Leanback launcher entry points. It is intended for use with a TV remote: the home screen has an app row, an All Apps view, and pages for search and settings.
 
-The project may interest Fire TV owners who want to explore an alternative launcher, and Android developers interested in a small, direct Android SDK build. Fire OS controls how the physical Home button is routed, so installing this app does not guarantee that the device will open it when Home is pressed.
+The project may interest Fire TV owners who want to explore an alternative launcher, and Android developers interested in a small, direct Android SDK build.
 
 ## Important: Fire TV Limitations & Setup
 
