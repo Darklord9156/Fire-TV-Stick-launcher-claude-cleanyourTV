@@ -23,10 +23,11 @@ For security, disable **Wireless Debugging** after you finish installing and con
 
 - **App organization:** browse launchable installed apps, move apps between All Apps and a six-item Main Row, and reorder the Main Row with the remote.
 - **Backgrounds:** select the built-in background or custom images. The built-in `R.drawable.doom` resource is generated from the project-author-supplied `wallpapers/dooom.png`. Transfer images from a phone/browser over the local network, or copy images from a computer to the TV with ADB.
-- **Optional catalog search:** search TMDB for movies, television, and people. Search requires an internet connection and a user-provided TMDB API Read Access Token, which the app encrypts on the device.
 - **Personalization:** set the greeting name and select a focus-effect color in Settings.
-- **Fire TV shortcuts:** open Fire TV settings or return to Amazon Home from the app.
-- **Optional Home Keeper:** a best-effort service for certain older Fire OS versions. Its behavior depends on device firmware and does not control the physical Home button.
+**Custom Wallpapers via QR Code:** Upload your own background wallpapers easily by scanning a QR code.
+**Dynamic Wallpapers:** Enjoy a more lively home screen with wallpapers featuring subtle motion effects.
+- **Fire TV shortcuts:** open Fire TV settings or return to Amazon Home from the app. **Quick Settings Shortcuts:** Dedicated home screen icons provide direct access to Wi-Fi and Bluetooth settings.
+- **Optional Home Keeper:** a best-effort service for certain older Fire OS versions. Its behavior depends on device firmware.
 
 ## Screenshots
 
@@ -86,6 +87,22 @@ The installer saves device settings used by the optional Keeper workflow. To sto
 
 See [Troubleshooting](docs/TROUBLESHOOTING.md) for ADB, signing, installation, and recovery guidance.
 
+## Build & Install Using AI
+
+You can use **Claude Code, OpenAI Codex or Cursor** to build and install Liquid Home without manually handling the development setup.
+
+1. Clone or download this repository.
+2. Open the project folder in your AI coding assistant.
+3. Ask it to analyse the project, install required dependencies, build the APK and install it on your connected TV.
+
+**Suggested prompt:**
+
+```text
+Analyse this project, set up all required dependencies, build the Liquid Home APK, verify it and help me install it on my connected Fire TV or Android TV. Follow the repository instructions and do not modify existing source code or release credentials.
+```
+
+Some steps may require your approval or manual action.
+
 ## Build from source
 
 The build uses Windows PowerShell 5.1, JDK 17, Android SDK Platform 25, and Android Build Tools 34.0.0. It uses the Android SDK tools directly; Gradle and Android Studio are not required. `setup-tools.ps1` can find or provision a JDK and the required SDK components. SDK setup may download files and asks you to review and accept Google's Android SDK terms before installing missing SDK packages.
@@ -112,7 +129,15 @@ For a public release, create and securely back up a dedicated release keystore o
 .\liquid-home\build.ps1 -Release -ReleaseKeystorePath "D:\Secure\LiquidHome-release.jks" -ReleaseAlias "liquid-home" -DisplayName "Alex"
 ```
 
-Release signing invalidates any previous final APK, signs to a unique temporary APK, verifies it, then moves the verified file to `liquid-home/build/liquid-home.apk`. Passwords are supplied to `apksigner` through unique temporary process environment variables and cleared as soon as signing exits, before verification. Forced termination of PowerShell or the machine may bypass in-process cleanup; a temporary APK or a still-running signer child may remain. Keep the release keystore and encrypted backups outside the project in separate protected locations, and retain the same key for every update: Android will reject an update signed with a different key. See [Prerequisites](PREREQUISITES.md#signing-credentials) for details.
+**Release Signing Security**
+
+Release builds are signed using a dedicated release keystore. The build script signs the APK, verifies its signature, and only then places it at the final output location.
+
+Keep your release keystore and encrypted backups in secure locations outside the project. Never upload them to GitHub or share your passwords.
+
+**Important:** Always use the same release keystore for future updates. Android will reject updates signed with a different key. Losing your original release keystore can prevent you from publishing updates to existing installations.
+
+See [Prerequisites](PREREQUISITES.md#signing-credentials) for details.
 
 To verify a built APK, run:
 
