@@ -28,10 +28,6 @@ These screenshots were captured from Liquid Home running on a Fire TV.
 
 ![Liquid Home home screen](docs/screenshots/home-screen.png)
 
-### All Apps
-
-![Liquid Home All Apps screen](docs/screenshots/all-apps.png)
-
 ### All Apps deck
 
 ![Liquid Home All Apps deck](docs/screenshots/all-apps-deck.png)
