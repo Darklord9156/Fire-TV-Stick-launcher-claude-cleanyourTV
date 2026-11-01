@@ -92,12 +92,12 @@ See [Troubleshooting](docs/TROUBLESHOOTING.md) for ADB, signing, installation, a
 You can use **Claude Code, OpenAI Codex or Cursor** to build and install Liquid Home without manually handling the development setup.
 
 1. Copy and paste this GitHub repository URL into your AI coding assistant, or clone/download the repository and open the project folder.
-2. Ask the AI assistant to analyse the project, install required dependencies, build the APK and help install it on your connected TV.
+2. Copy and paste the below prompt.
 
 **Suggested prompt:**
 
 ```text
-Analyse this project, set up all required dependencies, build the Liquid Home APK, verify it and help me install it on my connected Fire TV or Android TV.
+Analyse this project, set up all required dependencies, build the Liquid Home APK and install it on my connected Fire TV or Android TV.
 
 Follow the repository instructions. Do not modify existing source code or release credentials.
 
