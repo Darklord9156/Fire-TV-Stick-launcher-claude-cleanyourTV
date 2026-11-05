@@ -137,6 +137,7 @@ public final class Home extends Activity {
     private final List<AppItem> homeAllApps = new ArrayList<>();
     private final List<AppItem> favorites = new ArrayList<>();
     private final List<AppItem> eligibleMainRowApps = new ArrayList<>();
+    private final HashSet<String> userExcludedAppPackages = new HashSet<>();
     private final List<GlassCard> navButtons = new ArrayList<>();
     private final List<String> navTargets = new ArrayList<>();
     private SharedPreferences prefs;
@@ -364,8 +365,13 @@ public final class Home extends Activity {
                 }
                 if (key == KeyEvent.KEYCODE_DPAD_DOWN && allAppsIndex >= 0) {
                     homeNavKeyHandled = true;
-                    int below = allAppsIndex + HOME_APPS_COLUMNS;
-                    if (below < homeAllAppCards.size()) homeAllAppCards.get(below).requestFocus();
+                    int nextRowStart = (allAppsIndex / HOME_APPS_COLUMNS + 1) * HOME_APPS_COLUMNS;
+                    if (nextRowStart < homeAllAppCards.size()) {
+                        int nextRowCount = Math.min(HOME_APPS_COLUMNS, homeAllAppCards.size() - nextRowStart);
+                        int currentColumn = allAppsIndex % HOME_APPS_COLUMNS;
+                        int below = nextRowStart + Math.min(currentColumn, nextRowCount - 1);
+                        homeAllAppCards.get(below).requestFocus();
+                    }
                     return true;
                 }
             }
@@ -605,6 +611,8 @@ public final class Home extends Activity {
 
     private void loadApps() {
         apps.clear(); homeAllApps.clear(); favorites.clear();
+        userExcludedAppPackages.clear();
+        userExcludedAppPackages.addAll(splitPackages(getString(R.string.user_app_visibility_exclusions)));
         PackageManager pm = getPackageManager();
         LinkedHashMap<String, Intent> launchables = new LinkedHashMap<>();
         Intent leanback = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
@@ -705,7 +713,8 @@ public final class Home extends Activity {
     }
 
     private boolean isExcludedAllApp(AppItem item) {
-        return item == null || EXCLUDED_ALL_APP_PACKAGES.contains(item.pkg) || isExcludedAppLabel(item.label);
+        return item == null || EXCLUDED_ALL_APP_PACKAGES.contains(item.pkg)
+            || userExcludedAppPackages.contains(item.pkg) || isExcludedAppLabel(item.label);
     }
 
     private boolean isExcludedAppLabel(String label) {
@@ -975,8 +984,8 @@ public final class Home extends Activity {
         }
         for (int i = 0; i < homeFavoriteCards.size(); i++) {
             GlassCard card = homeFavoriteCards.get(i);
-            card.setNextFocusLeftId(homeFavoriteCards.get(Math.max(0, i - 1)).getId());
-            card.setNextFocusRightId(homeFavoriteCards.get(Math.min(homeFavoriteCards.size() - 1, i + 1)).getId());
+            card.setNextFocusLeftId(homeFavoriteCards.get((i + homeFavoriteCards.size() - 1) % homeFavoriteCards.size()).getId());
+            card.setNextFocusRightId(homeFavoriteCards.get((i + 1) % homeFavoriteCards.size()).getId());
         }
         bindNavToScroll(homeScroll);
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(MATCH,
@@ -1037,7 +1046,10 @@ public final class Home extends Activity {
                 int rowStart = (i / HOME_APPS_COLUMNS) * HOME_APPS_COLUMNS;
                 int rowEnd = Math.min(rowStart + HOME_APPS_COLUMNS - 1, homeAllAppCards.size() - 1);
                 card.setNextFocusLeftId(homeAllAppCards.get(Math.max(rowStart, i - 1)).getId());
-                card.setNextFocusRightId(homeAllAppCards.get(Math.min(rowEnd, i + 1)).getId());
+                int rightIndex = i < rowEnd ? i + 1
+                        : rowEnd + 1 < homeAllAppCards.size() ? rowEnd + 1
+                        : rowStart > 0 ? rowStart - 1 : rowStart;
+                card.setNextFocusRightId(homeAllAppCards.get(rightIndex).getId());
                 int favoriteIndex = Math.min(i % HOME_APPS_COLUMNS, homeFavoriteCards.size() - 1);
                 int upIndex = i < HOME_APPS_COLUMNS ? -1
                         : Math.min(i - HOME_APPS_COLUMNS, homeAllAppCards.size() - 1);
