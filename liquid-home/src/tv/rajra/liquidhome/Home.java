@@ -525,6 +525,7 @@ public final class Home extends Activity {
         LinearLayout strip = (LinearLayout) cell.getParent();
         strip.removeView(cell); strip.addView(cell, target);
         movingMainRowIndex = target;
+        bindMainRowHorizontalFocus();
         selected.requestFocus();
         showMainRowMoveBadge();
         cell.announceForAccessibility("Position " + (target + 1) + " of " + favorites.size());
@@ -537,6 +538,16 @@ public final class Home extends Activity {
             if (i == movingMainRowIndex) {
                 badge.setText((i + 1) + " / " + favorites.size()); badge.setVisibility(View.VISIBLE);
             } else badge.setVisibility(View.GONE);
+        }
+    }
+
+    private void bindMainRowHorizontalFocus() {
+        int count = homeFavoriteCards.size();
+        if (count == 0) return;
+        for (int i = 0; i < count; i++) {
+            GlassCard card = homeFavoriteCards.get(i);
+            card.setNextFocusLeftId(homeFavoriteCards.get((i + count - 1) % count).getId());
+            card.setNextFocusRightId(homeFavoriteCards.get((i + 1) % count).getId());
         }
     }
 
@@ -982,11 +993,7 @@ public final class Home extends Activity {
             strip.addView(cell, cellLp);
             homeFavoriteCells.add(cell);
         }
-        for (int i = 0; i < homeFavoriteCards.size(); i++) {
-            GlassCard card = homeFavoriteCards.get(i);
-            card.setNextFocusLeftId(homeFavoriteCards.get((i + homeFavoriteCards.size() - 1) % homeFavoriteCards.size()).getId());
-            card.setNextFocusRightId(homeFavoriteCards.get((i + 1) % homeFavoriteCards.size()).getId());
-        }
+        bindMainRowHorizontalFocus();
         bindNavToScroll(homeScroll);
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(MATCH,
                 favoriteRowTileHeight + tileLabelBlock() + dp(16)); rowLp.topMargin = dp(206);
