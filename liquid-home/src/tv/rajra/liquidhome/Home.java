@@ -2038,7 +2038,7 @@ public final class Home extends Activity {
                 mainHandler.post(() -> {
                     if (wallpaperTransferStatus != null) {
                         wallpaperTransferStatus.setText(success
-                                ? "Saved " + filename + ". Close this session to select it."
+                                ? "Upload successful: " + filename + " is saved. Close this session to choose it in Backgrounds."
                                 : "Upload failed: " + message);
                     }
                 });
