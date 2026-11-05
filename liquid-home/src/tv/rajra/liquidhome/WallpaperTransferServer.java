@@ -203,8 +203,13 @@ final class WallpaperTransferServer implements AutoCloseable {
 
         File temporary = new File(wallpaperDirectory, ".upload-" + UUID.randomUUID().toString() + ".tmp");
         long written = 0;
-        try (FileOutputStream file = new FileOutputStream(temporary)) {
+        // Buffered writes avoid a native file write for every byte in the image.
+        try (BufferedOutputStream file = new BufferedOutputStream(new FileOutputStream(temporary), 64 * 1024)) {
             written = copyUntilBoundary(body, file, ("\r\n--" + boundary).getBytes(StandardCharsets.US_ASCII), MAX_UPLOAD_BYTES);
+            // Consume the closing multipart marker and any remaining request bytes before
+            // replying. Closing a TCP socket with unread request data can reset the
+            // connection, which makes mobile browsers report a network error at 100%.
+            drain(body);
         } catch (IOException e) {
             temporary.delete();
             respond(output, e instanceof UploadTooLargeException ? 413 : 400,
@@ -297,6 +302,11 @@ final class WallpaperTransferServer implements AutoCloseable {
         throw new IOException("Multipart boundary was not found.");
     }
 
+    private static void drain(InputStream input) throws IOException {
+        byte[] buffer = new byte[8192];
+        while (input.read(buffer) >= 0) { }
+    }
+
     private static String boundaryFrom(String contentType) {
         for (String parameter : contentType.split(";")) {
             String part = parameter.trim();
@@ -362,7 +372,7 @@ final class WallpaperTransferServer implements AutoCloseable {
                 "<progress id=progress max=100 value=0></progress><p id=status role=status aria-live=polite>Select an image to begin.</p>" +
                 "<script>const f=document.getElementById('form'),i=document.getElementById('file'),b=document.getElementById('send'),p=document.getElementById('progress'),s=document.getElementById('status');" +
                 "f.addEventListener('submit',e=>{e.preventDefault();if(!i.files.length)return;const x=i.files[0],q=new XMLHttpRequest(),d=new FormData();d.append('image',x,x.name);b.disabled=true;p.value=0;s.textContent='Uploading '+x.name+'…';" +
-                "q.upload.onprogress=e=>{if(e.lengthComputable){p.value=Math.round(e.loaded*100/e.total);s.textContent='Uploading… '+p.value+'%'}};q.onload=()=>{b.disabled=false;try{const r=JSON.parse(q.responseText);if(q.status>=200&&q.status<300&&r.ok){p.value=100;s.textContent='Upload complete: '+r.filename+'. Close this session on your TV to select it.';f.reset();return}}catch(e){}s.textContent=q.responseText||'Upload failed. Try another image.'};" +
+                "q.upload.onprogress=e=>{if(e.lengthComputable){p.value=Math.round(e.loaded*100/e.total);s.textContent=p.value>=100?'Received by Fire TV. Saving…':'Uploading… '+p.value+'%'}};q.upload.onload=()=>{p.value=100;s.textContent='Received by Fire TV. Saving…'};q.onload=()=>{b.disabled=false;try{const r=JSON.parse(q.responseText);if(q.status>=200&&q.status<300&&r.ok){p.value=100;s.textContent='Upload successful — '+r.filename+' is saved on your Fire TV. You can now close this page.';f.reset();return}}catch(e){}s.textContent=q.responseText||'Upload failed. Try another image.'};" +
                 "q.onerror=()=>{b.disabled=false;s.textContent='Could not reach the Fire TV. Keep this page open and try again.'};q.open('POST',location.pathname);q.send(d)});</script></main></body></html>";
     }
 
