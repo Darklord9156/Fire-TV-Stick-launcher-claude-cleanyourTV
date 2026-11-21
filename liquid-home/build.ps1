@@ -244,7 +244,7 @@ $Classes = Join-Path $Work 'classes'; $Generated = Join-Path $Work 'generated'
 New-Item -ItemType Directory -Force -Path $Classes,$Generated | Out-Null
 & (Join-Path $BuildTools 'aapt2.exe') compile --dir $BuildResources -o $ResZip
 if ($LASTEXITCODE -ne 0) { throw 'aapt2 resource compilation failed.' }
-& (Join-Path $BuildTools 'aapt2.exe') link -I $AndroidJar --manifest (Join-Path $Root 'AndroidManifest.xml') $ResZip --min-sdk-version 25 --target-sdk-version 25 --version-code 1 --version-name 1.0 --java $Generated -o $AppApk
+& (Join-Path $BuildTools 'aapt2.exe') link -I $AndroidJar --manifest (Join-Path $Root 'AndroidManifest.xml') $ResZip --min-sdk-version 25 --target-sdk-version 25 --version-code 11 --version-name 2.2.6 --java $Generated -o $AppApk
 if ($LASTEXITCODE -ne 0) { throw 'aapt2 resource/manifest linking failed.' }
 $Sources = @(Get-ChildItem (Join-Path $Root 'src') -Filter '*.java' -Recurse | ForEach-Object FullName) + @(Get-ChildItem $Generated -Filter '*.java' -Recurse | ForEach-Object FullName)
 if ($Sources.Count -eq 0) { throw 'No Java sources found.' }
