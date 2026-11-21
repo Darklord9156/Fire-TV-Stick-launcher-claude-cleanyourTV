@@ -32,6 +32,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.LruCache;
 import android.view.animation.LinearInterpolator;
 import android.view.animation.PathInterpolator;
 import android.os.Bundle;
@@ -101,6 +102,8 @@ public final class Home extends Activity {
         0xFFA43900, 0xFF006565, 0xFF4B8100, 0xFF424B54, 0xFF8E6100
     };
     private static final String BUILTIN = "builtin";
+    private static final String NO_WALLPAPER = "__none__";
+    private static final String BUILTIN_WALLPAPER_DELETED_KEY = "builtin_wallpaper_deleted";
     private static final String LEGACY_BUILTIN_WALLPAPER = "doom.jpg";
     private static final int REQUEST_ADD_WALLPAPER = 7301;
     private static final int REQUEST_UNINSTALL_APP = 7303;
@@ -112,6 +115,15 @@ public final class Home extends Activity {
     private static final ExecutorService WALLPAPER_BLUR_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "liquid-wallpaper-blur"); t.setDaemon(true); return t;
     });
+    private static final ExecutorService WALLPAPER_IMAGE_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "liquid-wallpaper-image"); t.setDaemon(true); return t;
+    });
+    private static final ExecutorService WALLPAPER_THUMB_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "liquid-wallpaper-thumbnails"); t.setDaemon(true); return t;
+    });
+    private static final LruCache<String, Bitmap> WALLPAPER_THUMB_CACHE = new LruCache<String, Bitmap>(4096) {
+        @Override protected int sizeOf(String key, Bitmap bitmap) { return Math.max(1, bitmap.getByteCount() / 1024); }
+    };
     private static final int[] APP_GLOWS = {0xFFEC4E4E, 0xFF43A5FF, 0xFF38D49A, 0xFFB16CFF, 0xFFFF8A42, 0xFF8B7BFF, 0xFFFFD056, 0xFF4CCFC7, 0xFFFF6DAA};
     private static final String[] APP_ORDER = {
         "com.netflix.ninja", "com.amazon.firebat", "com.amazon.firetv.youtube",
@@ -146,6 +158,8 @@ public final class Home extends Activity {
     private ImageView wallpaperBlurView;
     private View wallpaperTransitionShade;
     private String wallpaperRenderKey;
+    private String wallpaperLoadingKey;
+    private int wallpaperImageGeneration;
     private int wallpaperBlurGeneration;
     private float wallpaperBlurAmount;
     private AmbientGlowView ambientGlow;
@@ -588,6 +602,8 @@ public final class Home extends Activity {
 
     @Override protected void onDestroy() {
         stopWallpaperTransfer();
+        wallpaperImageGeneration++;
+        wallpaperLoadingKey = null;
         wallpaperBlurGeneration++;
         if (packageChangeReceiver != null) {
             unregisterReceiver(packageChangeReceiver);
@@ -1718,7 +1734,8 @@ public final class Home extends Activity {
         bindNavToScroll(scroll);
         LinearLayout strip = new LinearLayout(this); strip.setClipChildren(false);
         GlassCard defaultWallpaper = wallpaperCard(BUILTIN, "Default background", true);
-        defaultWallpaper.setOnClickListener(v -> chooseWallpaper(BUILTIN)); strip.addView(defaultWallpaper, new LinearLayout.LayoutParams(dp(240), dp(132)));
+        defaultWallpaper.setOnClickListener(v -> chooseWallpaper(BUILTIN));
+        strip.addView(defaultWallpaper, new LinearLayout.LayoutParams(dp(240), dp(132)));
         GlassCard transfer = glass(18); transfer.setFocusable(true); transfer.setContentDescription("Transfer from Phone/PC");
         LinearLayout transferContent = new LinearLayout(this); transferContent.setOrientation(LinearLayout.VERTICAL); transferContent.setGravity(Gravity.CENTER);
         TextView transferGlyph = text("⇧", 34, 0xFFFFD49A, Typeface.create("sans-serif-light", 0)); transferGlyph.setGravity(Gravity.CENTER);
@@ -1745,12 +1762,6 @@ public final class Home extends Activity {
             item.setNextFocusRightId(right);
         }
         scroll.addView(strip); column.addView(scroll, new LinearLayout.LayoutParams(MATCH, WRAP));
-        String selectedWallpaper = selectedWallpaper();
-        if (!BUILTIN.equalsIgnoreCase(selectedWallpaper)
-                && new File(wallpaperDir(), selectedWallpaper).isFile()) {
-            addAction(column, "Delete selected wallpaper", "Remove " + selectedWallpaper + " from this Fire TV", "×",
-                    () -> confirmDeleteWallpaper(selectedWallpaper));
-        }
         TextView note = text("Choose a photo to apply it. Long-press a photo to delete it. Transfer images over Wi-Fi or copy them into the PC wallpapers folder and run sync-wallpapers.ps1.", 13, 0xDFFFFFFF, Typeface.create("sans-serif-light", 0));
         note.setLineSpacing(dp(4), 1); LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(dp(900), WRAP); noteLp.topMargin = dp(12); column.addView(note, noteLp);
         pageHost.addView(column, new LinearLayout.LayoutParams(MATCH, MATCH));
@@ -1770,14 +1781,37 @@ public final class Home extends Activity {
         LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
         ImageView preview = new ImageView(this); preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
         if (bundled) preview.setImageResource(R.drawable.doom);
-        else preview.setImageBitmap(decodeImage(new File(wallpaperDir(), file), dp(360), dp(200)));
+        else loadWallpaperThumbnail(preview, new File(wallpaperDir(), file));
         LinearLayout.LayoutParams imageLp = new LinearLayout.LayoutParams(dp(88), dp(88)); imageLp.rightMargin = dp(12); row.addView(preview, imageLp);
         LinearLayout labels = new LinearLayout(this); labels.setOrientation(LinearLayout.VERTICAL);
         TextView name = text(bundled ? "Doom" : file, 15, 0xFFF5F5F5, Typeface.create("sans-serif-medium", 0)); name.setMaxLines(1);
-        TextView detail = text(subtitle, 12, 0xCFFFFFFF, Typeface.create("sans-serif-light", 0));
+        boolean selected = file.equalsIgnoreCase(selectedWallpaper());
+        TextView detail = text(selected ? "✓  CURRENT BACKGROUND" : "Tap to use · Long-press to delete", 12,
+                selected ? 0xFFFFD49A : 0xCFFFFFFF, Typeface.create(selected ? "sans-serif-medium" : "sans-serif-light", 0));
         labels.addView(name); LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(WRAP, WRAP); dlp.topMargin = dp(5); labels.addView(detail, dlp);
         row.addView(labels, new LinearLayout.LayoutParams(0, WRAP, 1)); card.addView(row, new FrameLayout.LayoutParams(MATCH, MATCH));
-        card.setActive(file.equalsIgnoreCase(selectedWallpaper())); return card;
+        card.setContentDescription((bundled ? "Default background" : file) + (selected ? ", current background" : ", long press to delete"));
+        card.setActive(selected); return card;
+    }
+
+    private void loadWallpaperThumbnail(ImageView preview, File image) {
+        int width = dp(360), height = dp(200);
+        String key = image.getAbsolutePath() + ":" + image.lastModified() + ":" + image.length() + ":" + width + "x" + height;
+        preview.setTag(key);
+        preview.setBackgroundColor(0x33242C38);
+        Bitmap cached = WALLPAPER_THUMB_CACHE.get(key);
+        if (cached != null && !cached.isRecycled()) {
+            preview.setImageBitmap(cached);
+            return;
+        }
+        WALLPAPER_THUMB_EXECUTOR.execute(() -> {
+            Bitmap thumbnail = decodeImage(image, width, height);
+            if (thumbnail == null) return;
+            WALLPAPER_THUMB_CACHE.put(key, thumbnail);
+            mainHandler.post(() -> {
+                if (key.equals(preview.getTag()) && !thumbnail.isRecycled()) preview.setImageBitmap(thumbnail);
+            });
+        });
     }
 
     private void addAction(LinearLayout list, String title, String detail, String glyph, Runnable onClick) {
@@ -2038,7 +2072,7 @@ public final class Home extends Activity {
                 mainHandler.post(() -> {
                     if (wallpaperTransferStatus != null) {
                         wallpaperTransferStatus.setText(success
-                                ? "Upload successful: " + filename + " is saved. Close this session to choose it in Backgrounds."
+                                ? message + " " + filename + " is saved. Close this session to choose it in Backgrounds."
                                 : "Upload failed: " + message);
                     }
                 });
@@ -2128,10 +2162,34 @@ public final class Home extends Activity {
     }
 
     private void confirmDeleteWallpaper(String filename) {
+        File previewFile = new File(wallpaperDir(), filename);
+        LinearLayout confirmation = new LinearLayout(this);
+        confirmation.setOrientation(LinearLayout.HORIZONTAL);
+        confirmation.setGravity(Gravity.CENTER_VERTICAL);
+        confirmation.setPadding(dp(20), dp(12), dp(20), dp(8));
+        ImageView preview = new ImageView(this);
+        preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        Bitmap thumbnail = decodeImage(previewFile, dp(420), dp(240));
+        if (thumbnail != null) preview.setImageBitmap(thumbnail);
+        preview.setContentDescription("Preview of " + filename + " to be deleted");
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(dp(220), dp(124));
+        previewParams.rightMargin = dp(18);
+        confirmation.addView(preview, previewParams);
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.addView(text("Delete this exact image?", 16, 0xFFF5F5F5, Typeface.create("sans-serif-medium", 0)));
+        TextView exactName = text(filename, 14, 0xFFFFD49A, Typeface.create("sans-serif", 0));
+        exactName.setMaxLines(2);
+        labels.addView(exactName);
+        TextView warning = text("This removes the image from your wallpaper collection.", 12, 0xDFFFFFFF, Typeface.create("sans-serif-light", 0));
+        LinearLayout.LayoutParams warningParams = new LinearLayout.LayoutParams(WRAP, WRAP);
+        warningParams.topMargin = dp(6);
+        labels.addView(warning, warningParams);
+        confirmation.addView(labels, new LinearLayout.LayoutParams(0, WRAP, 1f));
         new AlertDialog.Builder(this)
-                .setTitle("Delete wallpaper?")
-                .setMessage("Remove " + filename + " from your Fire TV wallpaper collection?")
-                .setNegativeButton("Cancel", null)
+                .setTitle("Confirm wallpaper deletion")
+                .setView(confirmation)
+                .setNegativeButton("Keep image", null)
                 .setPositiveButton("Delete", (dialog, which) -> {
                     File image = new File(wallpaperDir(), filename);
                     try {
@@ -2213,16 +2271,55 @@ public final class Home extends Activity {
             try { renderKey = chosen.getCanonicalPath() + ":" + chosen.lastModified() + ":" + chosen.length(); }
             catch (java.io.IOException ignored) { renderKey = chosen.getAbsolutePath(); }
         }
+        if (!custom) {
+            if (BUILTIN.equals(wallpaperRenderKey) && wallpaperView.getDrawable() != null && wallpaperLoadingKey == null) return;
+            wallpaperImageGeneration++;
+            wallpaperLoadingKey = null;
+            wallpaperRenderKey = BUILTIN;
+            wallpaperView.setImageResource(R.drawable.doom);
+            Drawable drawable = wallpaperView.getDrawable();
+            Bitmap source = drawable instanceof BitmapDrawable ? ((BitmapDrawable) drawable).getBitmap() : null;
+            prepareWallpaperBlur(source);
+            return;
+        }
         if (renderKey.equals(wallpaperRenderKey) && wallpaperView.getDrawable() != null) return;
-        Bitmap selected = custom ? decodeImage(chosen, 1920, 1080) : null;
-        if (custom && selected == null) renderKey = BUILTIN;
-        if (renderKey.equals(wallpaperRenderKey) && wallpaperView.getDrawable() != null) return;
-        wallpaperRenderKey = renderKey;
-        if (selected != null) wallpaperView.setImageBitmap(selected);
-        else wallpaperView.setImageResource(R.drawable.doom);
-        Drawable drawable = wallpaperView.getDrawable();
-        Bitmap source = drawable instanceof BitmapDrawable ? ((BitmapDrawable) drawable).getBitmap() : null;
-        prepareWallpaperBlur(source);
+        if (renderKey.equals(wallpaperLoadingKey)) return;
+        final int generation = ++wallpaperImageGeneration;
+        wallpaperLoadingKey = renderKey;
+        final String requestedKey = renderKey;
+        WALLPAPER_IMAGE_EXECUTOR.execute(() -> {
+            Bitmap preview = decodeImage(chosen, 640, 360);
+            final Bitmap[] previewHolder = new Bitmap[] {preview};
+            if (preview != null) mainHandler.post(() -> {
+                if (generation != wallpaperImageGeneration || wallpaperView == null) {
+                    if (!preview.isRecycled()) preview.recycle();
+                    return;
+                }
+                wallpaperView.setImageBitmap(preview);
+            });
+            Bitmap selected = decodeImage(chosen, 1920, 1080);
+            mainHandler.post(() -> {
+                if (generation != wallpaperImageGeneration || wallpaperView == null) {
+                    if (selected != null && !selected.isRecycled()) selected.recycle();
+                    return;
+                }
+                wallpaperLoadingKey = null;
+                if (selected == null) {
+                    if (previewHolder[0] != null) {
+                        wallpaperRenderKey = requestedKey;
+                    } else {
+                        wallpaperRenderKey = BUILTIN;
+                        wallpaperView.setImageResource(R.drawable.doom);
+                    }
+                } else {
+                    wallpaperRenderKey = requestedKey;
+                    wallpaperView.setImageBitmap(selected);
+                }
+                Drawable drawable = wallpaperView.getDrawable();
+                Bitmap source = drawable instanceof BitmapDrawable ? ((BitmapDrawable) drawable).getBitmap() : null;
+                prepareWallpaperBlur(source);
+            });
+        });
     }
 
     private void prepareWallpaperBlur(Bitmap source) {
@@ -2295,8 +2392,13 @@ public final class Home extends Activity {
 
     private String selectedWallpaper() {
         if (prefs == null) return BUILTIN;
+        if (prefs.getBoolean(BUILTIN_WALLPAPER_DELETED_KEY, false)) prefs.edit().remove(BUILTIN_WALLPAPER_DELETED_KEY).apply();
         String selected = prefs.getString("wallpaper", BUILTIN);
         if (LEGACY_BUILTIN_WALLPAPER.equalsIgnoreCase(selected)) {
+            prefs.edit().putString("wallpaper", BUILTIN).apply();
+            selected = BUILTIN;
+        }
+        if (NO_WALLPAPER.equals(selected)) {
             prefs.edit().putString("wallpaper", BUILTIN).apply();
             return BUILTIN;
         }
