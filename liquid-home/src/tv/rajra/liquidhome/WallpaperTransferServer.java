@@ -134,7 +134,9 @@ final class WallpaperTransferServer implements AutoCloseable {
                 }
                 try (Socket client = serverSocket.accept()) {
                     currentClient = client;
-                    client.setSoTimeout(30000);
+                    // Large photos can pause while a phone converts or sends them over Wi-Fi.
+                    // Keep the same request alive through longer transfer gaps.
+                    client.setSoTimeout(300000);
                     handle(client);
                     lastActivityAt = System.currentTimeMillis();
                 } catch (SocketTimeoutException ignored) {
@@ -230,7 +232,17 @@ final class WallpaperTransferServer implements AutoCloseable {
             return;
         }
         respond(output, 200, "{\"ok\":true,\"filename\":\"" + jsonEscape(target.getName()) + "\"}", "application/json; charset=utf-8");
-        notifyUpload(target.getName(), true, "Image uploaded and saved.");
+        int batchIndex = positiveHeader(headers, "x-liquid-batch-index");
+        int batchCount = positiveHeader(headers, "x-liquid-batch-count");
+        String message = batchCount > 1
+                ? (batchIndex >= batchCount ? "All " + batchCount + " images uploaded successfully." : "Image " + batchIndex + " of " + batchCount + " uploaded.")
+                : "Image uploaded and saved.";
+        notifyUpload(target.getName(), true, message);
+    }
+
+    private static int positiveHeader(Map<String, String> headers, String name) {
+        try { return Math.max(0, Integer.parseInt(headers.get(name))); }
+        catch (Exception ignored) { return 0; }
     }
 
     private File uniqueTarget(String name) {
@@ -367,13 +379,15 @@ final class WallpaperTransferServer implements AutoCloseable {
                 "<title>Liquid Home wallpaper transfer</title><style>body{font:17px system-ui,sans-serif;max-width:620px;margin:8vh auto;padding:24px;background:#10141d;color:#f5f7fb}" +
                 "main{background:#1c2431;padding:28px;border-radius:20px}button,input{font:inherit}button{padding:12px 20px;border:0;border-radius:10px;background:#79baff;color:#08111b;font-weight:700}" +
                 "progress{width:100%;height:20px}#status{min-height:2em;color:#d9e7f7}.hint{color:#b7c4d2}</style></head><body><main>" +
-                "<h1>Send a wallpaper to Liquid Home</h1><p class=hint>Choose a JPG, JPEG, PNG or WebP image. It will be saved to your Fire TV wallpaper collection and will not be applied automatically.</p>" +
-                "<form id=form><input id=file type=file accept='.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp' required><p><button id=send type=submit>Upload image</button></p></form>" +
+                "<h1>Send wallpapers to Liquid Home</h1><p class=hint>Choose one or more JPG, JPEG, PNG or WebP images. All are saved to your Fire TV wallpaper collection and are not applied automatically.</p>" +
+                "<form id=form><input id=file type=file accept='.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp' multiple required><p><button id=send type=submit>Upload images</button></p></form>" +
                 "<progress id=progress max=100 value=0></progress><p id=status role=status aria-live=polite>Select an image to begin.</p>" +
                 "<script>const f=document.getElementById('form'),i=document.getElementById('file'),b=document.getElementById('send'),p=document.getElementById('progress'),s=document.getElementById('status');" +
-                "f.addEventListener('submit',e=>{e.preventDefault();if(!i.files.length)return;const x=i.files[0],q=new XMLHttpRequest(),d=new FormData();d.append('image',x,x.name);b.disabled=true;p.value=0;s.textContent='Uploading '+x.name+'…';" +
-                "q.upload.onprogress=e=>{if(e.lengthComputable){p.value=Math.round(e.loaded*100/e.total);s.textContent=p.value>=100?'Received by Fire TV. Saving…':'Uploading… '+p.value+'%'}};q.upload.onload=()=>{p.value=100;s.textContent='Received by Fire TV. Saving…'};q.onload=()=>{b.disabled=false;try{const r=JSON.parse(q.responseText);if(q.status>=200&&q.status<300&&r.ok){p.value=100;s.textContent='Upload successful — '+r.filename+' is saved on your Fire TV. You can now close this page.';f.reset();return}}catch(e){}s.textContent=q.responseText||'Upload failed. Try another image.'};" +
-                "q.onerror=()=>{b.disabled=false;s.textContent='Could not reach the Fire TV. Keep this page open and try again.'};q.open('POST',location.pathname);q.send(d)});</script></main></body></html>";
+                "f.addEventListener('submit',async e=>{e.preventDefault();const files=Array.from(i.files);if(!files.length)return;b.disabled=true;let doneBytes=0,totalBytes=files.reduce((n,x)=>n+x.size,0),uploaded=[];p.value=0;" +
+                "for(let n=0;n<files.length;n++){const x=files[n];s.textContent='Uploading '+(n+1)+' of '+files.length+': '+x.name;const result=await new Promise(resolve=>{const q=new XMLHttpRequest(),d=new FormData();d.append('image',x,x.name);q.open('POST',location.pathname);q.setRequestHeader('X-Liquid-Batch-Index',String(n+1));q.setRequestHeader('X-Liquid-Batch-Count',String(files.length));" +
+                "q.upload.onprogress=e=>{if(e.lengthComputable){const percent=Math.round((doneBytes+Math.min(x.size,x.size*e.loaded/e.total))*100/Math.max(1,totalBytes));p.value=percent;s.textContent='Uploading '+(n+1)+' of '+files.length+': '+x.name+' — '+percent+'% overall'}};q.onload=()=>{try{const r=JSON.parse(q.responseText);resolve(q.status>=200&&q.status<300&&r.ok?{ok:true,name:r.filename}:{ok:false,message:q.responseText||'Upload failed.'})}catch(e){resolve({ok:false,message:q.responseText||'Upload failed.'})}};q.onerror=()=>resolve({ok:false,message:'Connection to Fire TV was interrupted during this image. Earlier saved images remain on the TV.'});q.ontimeout=()=>resolve({ok:false,message:'This image took too long to reach Fire TV. Keep the TV transfer dialog open and try again.'});q.timeout=600000;q.send(d)});" +
+                "if(!result.ok){b.disabled=false;s.textContent='Stopped after '+uploaded.length+' of '+files.length+' images. '+x.name+': '+result.message;return}uploaded.push(result.name);doneBytes+=x.size;p.value=Math.round(doneBytes*100/Math.max(1,totalBytes));s.textContent='Saved '+uploaded.length+' of '+files.length+': '+result.name}" +
+                "p.value=100;s.textContent='All '+uploaded.length+' images uploaded successfully. Saved: '+uploaded.join(', ');b.disabled=false;f.reset()});</script></main></body></html>";
     }
 
     private static String jsonEscape(String value) {
