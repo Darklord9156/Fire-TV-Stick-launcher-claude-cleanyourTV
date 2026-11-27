@@ -35,15 +35,15 @@ These screenshots were captured from Liquid Home running on a Fire TV.
 
 ### Home screen
 
-![Liquid Home home screen](docs/screenshots/home-screen.png)
+![Liquid Home home screen](docs/screenshots/homescreen.png)
 
 ### All Apps deck
 
-![Liquid Home All Apps deck](docs/screenshots/all-apps-deck.png)
+![Liquid Home All Apps deck](docs/screenshots/all-apps.png)
 
-### Settings
+### Wallpapers
 
-![Liquid Home Settings screen](docs/screenshots/settings.png)
+![Liquid Home Settings screen](docs/screenshots/wallpapers.png)
 
 ## Compatibility
 
