@@ -16,6 +16,10 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.BitmapShader;
+import android.graphics.LightingColorFilter;
+import android.graphics.Matrix;
+import android.graphics.Shader;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -23,10 +27,6 @@ import android.graphics.RectF;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.Canvas;
-import android.renderscript.Allocation;
-import android.renderscript.Element;
-import android.renderscript.RenderScript;
-import android.renderscript.ScriptIntrinsicBlur;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -86,6 +86,7 @@ public final class Home extends Activity {
     private static final String DISPLAY_NAME_KEY = "display_name";
     private static final String NAME_SETUP_COMPLETE = "name_setup_complete";
     private static final String FOCUS_EFFECT_COLOR_KEY = "focus_effect_color_index";
+    private static final String ANIMATION_PROFILE_KEY = "animation_profile_classic";
     private static final String MAIN_ROW_KEY = "main_row_packages";
     private static final String ALL_APPS_ORDER_KEY = "all_apps_order";
     private static final String[] STREAMING_PRIORITY = {
@@ -109,7 +110,9 @@ public final class Home extends Activity {
     private static final int REQUEST_UNINSTALL_APP = 7303;
     private static final int HOME_APPS_COLUMNS = 6;
     private static final float HOME_TILE_ASPECT_RATIO = 1.695f;
-    private static final float HOME_HERO_COMPACT_SCALE = .66f;
+    private static final float HOME_HERO_COMPACT_SCALE = .68f;
+    private static final float HOME_HERO_COMPACT_ALPHA = .64f;
+    private static final float HOME_GREETING_COMPACT_ALPHA = .10f;
     private static final int REQUEST_TMDB_TOKEN = 7302;
     private static final ExecutorService SEARCH_EXECUTOR = Executors.newSingleThreadExecutor();
     private static final ExecutorService WALLPAPER_BLUR_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
@@ -155,19 +158,23 @@ public final class Home extends Activity {
     private SharedPreferences prefs;
     private FrameLayout root;
     private ImageView wallpaperView;
-    private ImageView wallpaperBlurView;
     private View wallpaperTransitionShade;
     private String wallpaperRenderKey;
     private String wallpaperLoadingKey;
     private int wallpaperImageGeneration;
-    private int wallpaperBlurGeneration;
-    private float wallpaperBlurAmount;
+    private volatile int galleryPreviewGeneration;
+    private Runnable galleryPreviewPending;
+    private ImageView galleryPreviewFront, galleryPreviewBack;
+    private View galleryInitialFocus;
+    private String galleryPreviewKey;
+    private TextView galleryName, galleryStatus;
     private AmbientGlowView ambientGlow;
     private LinearLayout floatingNav;
     private HomeScrollView homeScroll;
     private View homeHeroView;
     private TextView homeClockView;
-    private TextView homeGreetingView;
+    private CinematicGreetingView homeGreetingView;
+    private boolean homeHasPaused;
     private float homeHeroCollapseFraction;
     private View homeFavoriteStrip;
     private boolean homeChromeAutoHide;
@@ -180,17 +187,45 @@ public final class Home extends Activity {
     private View homeAllAppsTitle;
     private FrameLayout homeAllAppsSection;
     private ImageView homeAllAppsBlur;
+    private LinearLayout homeAllAppsGrid;
+    private FrameLayout homeAllAppsGridHost;
+    private LinearLayout allAppsPreviewInFlight;
+    private static final int ALL_APPS_CASCADE_ROWS = 3;
+    private static final long ALL_APPS_CASCADE_DELAY_MS = 60L;
+    private float allAppsCascadeProgress;
+    private static final float ALL_APPS_WALLPAPER_SHADE = .40f;
+    private static final float ALL_APPS_WALLPAPER_ZOOM = 1.16f;
     private boolean homeAllAppsExpanded;
     private boolean homeAllAppsTransitionTargetExpanded;
     // ---- Motion design system: one set of durations and curves used by every animation ----
     private static final long MOTION_FOCUS_IN_MS = 140L, MOTION_FOCUS_OUT_MS = 110L;   // tile / button focus
-    private static final long MOTION_APP_TILE_FOCUS_IN_MS = 220L, MOTION_APP_TILE_FOCUS_OUT_MS = 190L;
-    private static final long MOTION_VIEWPORT_MS = 560L;                               // Home <-> All Apps (both ways)
+    private static final long MOTION_APP_TILE_FOCUS_IN_MS = 90L, MOTION_APP_TILE_FOCUS_OUT_MS = 70L;
+    private static final long SPOTLIGHT_MS = 240L;
+    private static final long NAV_SPOTLIGHT_MS = 280L;
+    private static final float COUNTERFLOW_LIFT_DP = 10f;
+    private static final float COUNTERFLOW_DIP_DP = 5f;
+    private static final float COUNTERFLOW_DIP_PEAK = .55f;
+    private static final float ORBIT_ANGLE_PER_COLUMN = 12f;
+    private static final float ORBIT_MAX_ANGLE = 30f;
+    private static final float ORBIT_LIFT_DP = 7f;
+    private static final float ORBIT_DROP_PER_COLUMN_DP = 3f;
+    private static final float ORBIT_MAX_DROP_DP = 12f;
+    // D-pad auto-repeat must not outrun the visible spotlight transition.
+    private static final long SPOTLIGHT_REPEAT_MS = 140L;
+    private static final long SPOTLIGHT_REPEAT_STEP_MS = 165L;
+    private long lastSpotlightHorizontalStep = -1L;
+    private boolean spotlightRepeatDispatch;
+    private static final float SPOTLIGHT_SCALE = 1.12f;
+    private static final float SPOTLIGHT_DIM_SCALE = .96f;
+    private static final float SPOTLIGHT_DIM_AMOUNT = .40f;
+    private static final long MOTION_VIEWPORT_MS = 340L;                               // Home <-> All Apps (both ways)
     private static final long MOTION_GLOW_MS = 160L, MOTION_NAV_MS = 200L, MOTION_PAGE_MS = 200L;
     /** Decelerating entrance: responsive start, soft landing (focus in, page enter). */
     private static final android.view.animation.Interpolator EASE_OUT = new PathInterpolator(.2f, 0f, .2f, 1f);
     /** Smooth acceleration and deceleration for movement (viewport, glow, nav). */
     private static final android.view.animation.Interpolator EASE_MOVE = new PathInterpolator(.4f, 0f, .2f, 1f);
+    // Cinematic hero fade uses the same reversible viewport easing as the scroll.
+    private static final long GREETING_FOCUS_MS = 1000L;
     private ValueAnimator homeViewportAnimator;
     private int homeAllAppsTargetScroll;
     private int lastFavoriteFocus;
@@ -256,21 +291,39 @@ public final class Home extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        boolean returning = homeHasPaused;
+        homeHasPaused = false;
         // Keep the existing view tree intact while the OS uninstall confirmation is open.
         // The activity result refreshes it and restores focus when the system flow returns.
         if (pendingUninstallPackage != null) return;
-        loadApps();
-        setWallpaper();
         if (returnToHomeFromKeeper) {
             returnToHomeFromKeeper = false;
-            showPage("home");
-        } else if ("home".equals(page) || "apps".equals(page)) showPage(page);
+            if (!"home".equals(page)) showPage("home");
+            else if (homeScroll != null && homeScroll.getScrollY() > 0) returnToFavorites();
+        }
+        if (returning && "home".equals(page) && !homeAllAppsExpanded && homeViewportAnimator == null) {
+            playHomeGreeting();
+        }
+    }
+
+    @Override protected void onPause() {
+        homeHasPaused = true;
+        if (homeGreetingView != null) homeGreetingView.finishFocusReveal();
+        super.onPause();
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        showPage(intent.getStringExtra("page"));
+        String requested = intent.getStringExtra("page");
+        if (requested == null) requested = "home";
+        if ("home".equals(requested) && "home".equals(page) && pageHost != null) {
+            // Home Keeper can bring the existing task forward repeatedly. Preserve the
+            // populated view tree and only collapse All Apps when necessary.
+            if (homeScroll != null && homeScroll.getScrollY() > 0) returnToFavorites();
+        } else {
+            showPage(requested);
+        }
         Keeper.start(this);
     }
 
@@ -401,7 +454,46 @@ public final class Home extends Activity {
                 return true;
             }
         }
+        // Keep ordinary taps immediate. During a hold, accept only one native
+        // repeat per visible transition; discard surplus repeats, never queue them.
+        // Main-row move mode has already been handled above.
+        int key = event.getKeyCode();
+        if (event.getAction() == KeyEvent.ACTION_DOWN
+                && (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+            GlassCard before = focusedSpotlightCard();
+            if (before != null) {
+                boolean repeat = event.getRepeatCount() > 0;
+                long now = android.os.SystemClock.uptimeMillis();
+                if (repeat && (before.isSpotlightEntering()
+                        || (lastSpotlightHorizontalStep >= 0L
+                        && now - lastSpotlightHorizontalStep < SPOTLIGHT_REPEAT_STEP_MS))) {
+                    return true;
+                }
+                boolean previousRepeatDispatch = spotlightRepeatDispatch;
+                spotlightRepeatDispatch = repeat;
+                try {
+                    return super.dispatchKeyEvent(event);
+                } finally {
+                    spotlightRepeatDispatch = previousRepeatDispatch;
+                    if (getCurrentFocus() != before && focusedSpotlightCard() != before)
+                        lastSpotlightHorizontalStep = android.os.SystemClock.uptimeMillis();
+                }
+            }
+        }
         return super.dispatchKeyEvent(event);
+    }
+
+    private GlassCard focusedSpotlightCard() {
+        View current = getCurrentFocus();
+        while (current != null) {
+            if (current instanceof GlassCard) {
+                GlassCard card = (GlassCard) current;
+                if (card.spotlightEnabled && spotlightGroup(card) != null) return card;
+            }
+            android.view.ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
+        }
+        return null;
     }
 
     private void showMainRowRemoteMenu(int index) {
@@ -541,6 +633,7 @@ public final class Home extends Activity {
         movingMainRowIndex = target;
         bindMainRowHorizontalFocus();
         selected.requestFocus();
+        updateSpotlightGroup(homeFavoriteCards, selected);
         showMainRowMoveBadge();
         cell.announceForAccessibility("Position " + (target + 1) + " of " + favorites.size());
     }
@@ -555,13 +648,74 @@ public final class Home extends Activity {
         }
     }
 
+    /** The main row keeps its dimmed, compact state whenever focus leaves it. */
+    private List<GlassCard> spotlightGroup(GlassCard card) {
+        if (navButtons.contains(card)) return navButtons;
+        if ("home".equals(page)) {
+            if (homeFavoriteCards.contains(card)) return homeFavoriteCards;
+            if (homeAllAppCards.contains(card)) return homeAllAppCards;
+        }
+        return null;
+    }
+
+    private void updateSpotlightGroup(List<GlassCard> group, GlassCard selected) {
+        if (group == null || (selected != null && !group.contains(selected))) return;
+        boolean allApps = group == homeAllAppCards;
+        if (allApps) {
+            // Raise the focused row above adjacent rows without moving any tiles.
+            for (GlassCard card : group) {
+                View cell = spotlightCell(card, group);
+                if (cell != null && cell.getParent() instanceof View)
+                    ((View) cell.getParent()).setTranslationZ(0f);
+            }
+        }
+        final int selectedIndex = selected == null ? -1 : group.indexOf(selected);
+        final boolean orbitGroup = group == homeFavoriteCards || allApps;
+        for (int i = 0; i < group.size(); i++) {
+            GlassCard card = group.get(i);
+            boolean isSelected = card == selected;
+            View cell = spotlightCell(card, group);
+            if (cell != null) {
+                cell.setTranslationZ(isSelected ? dp(8) : 0f);
+                if (allApps && isSelected && cell.getParent() instanceof View)
+                    ((View) cell.getParent()).setTranslationZ(dp(8));
+            }
+            int state = isSelected ? 1 : (selected != null || group == homeFavoriteCards) ? -1 : 0;
+            if (isClassicAnimationProfile()) {
+                boolean activeOrbitRow = orbitGroup && selectedIndex >= 0
+                        && (!allApps || i / HOME_APPS_COLUMNS == selectedIndex / HOME_APPS_COLUMNS);
+                int distance = activeOrbitRow ? i - selectedIndex : 0;
+                float rotation = activeOrbitRow ? Math.max(-ORBIT_MAX_ANGLE,
+                        Math.min(ORBIT_MAX_ANGLE, -distance * ORBIT_ANGLE_PER_COLUMN)) : 0f;
+                float lift = activeOrbitRow ? dpF(isSelected ? -ORBIT_LIFT_DP
+                        : Math.min(ORBIT_MAX_DROP_DP, Math.abs(distance) * ORBIT_DROP_PER_COLUMN_DP)) : 0f;
+                card.animateOrbitSpotlight(state, orbitGroup ? cell : null, rotation, lift);
+            } else {
+                if (cell != null) cell.setRotationY(0f);
+                card.animateSpotlight(state, orbitGroup ? cell : null);
+            }
+        }
+    }
+
+    private View spotlightCell(GlassCard card, List<GlassCard> group) {
+        // Top icons are directly inside their halo wrapper; app tiles have
+        // a tile slot, a label column and then their fixed grid cell.
+        View current = card;
+        int levels = group == navButtons ? 1 : 3;
+        for (int i = 0; i < levels; i++) {
+            if (!(current.getParent() instanceof View)) return null;
+            current = (View) current.getParent();
+        }
+        return current;
+    }
+
     private void bindMainRowHorizontalFocus() {
         int count = homeFavoriteCards.size();
         if (count == 0) return;
         for (int i = 0; i < count; i++) {
             GlassCard card = homeFavoriteCards.get(i);
-            card.setNextFocusLeftId(homeFavoriteCards.get((i + count - 1) % count).getId());
-            card.setNextFocusRightId(homeFavoriteCards.get((i + 1) % count).getId());
+            card.setNextFocusLeftId(homeFavoriteCards.get(Math.max(0, i - 1)).getId());
+            card.setNextFocusRightId(homeFavoriteCards.get(Math.min(count - 1, i + 1)).getId());
         }
     }
 
@@ -604,7 +758,7 @@ public final class Home extends Activity {
         stopWallpaperTransfer();
         wallpaperImageGeneration++;
         wallpaperLoadingKey = null;
-        wallpaperBlurGeneration++;
+        clearGalleryPreview();
         if (packageChangeReceiver != null) {
             unregisterReceiver(packageChangeReceiver);
             packageChangeReceiver = null;
@@ -637,6 +791,7 @@ public final class Home extends Activity {
     }
 
     private void loadApps() {
+        roundedTileCache.evictAll();
         apps.clear(); homeAllApps.clear(); favorites.clear();
         userExcludedAppPackages.clear();
         userExcludedAppPackages.addAll(splitPackages(getString(R.string.user_app_visibility_exclusions)));
@@ -839,11 +994,8 @@ public final class Home extends Activity {
         wallpaperView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         wallpaperView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         root.addView(wallpaperView, new FrameLayout.LayoutParams(MATCH, MATCH));
-        wallpaperBlurView = new ImageView(this);
-        wallpaperBlurView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        wallpaperBlurView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        wallpaperBlurView.setAlpha(0f);
-        root.addView(wallpaperBlurView, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+
         wallpaperTransitionShade = new View(this);
         wallpaperTransitionShade.setBackgroundColor(Color.BLACK);
         wallpaperTransitionShade.setAlpha(0f);
@@ -862,6 +1014,8 @@ public final class Home extends Activity {
             @Override public boolean hasOverlappingRendering() { return false; }
         };
         floatingNav.setGravity(Gravity.CENTER_VERTICAL);
+        floatingNav.setFocusable(false);
+        disablePlatformFocusHighlight(floatingNav);
         floatingNav.setClipChildren(false); floatingNav.setClipToPadding(false);
         floatingNav.setPadding(0, dp(8), 0, dp(8));
         addFloatingButton("Wi-Fi", "wifi", NavGlyph.WIFI);
@@ -889,8 +1043,16 @@ public final class Home extends Activity {
         root.getViewTreeObserver().addOnGlobalLayoutListener(imeLayoutListener);
     }
 
+    private void disablePlatformFocusHighlight(View view) {
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            try { View.class.getMethod("setDefaultFocusHighlightEnabled", boolean.class).invoke(view, false); }
+            catch (Exception ignored) { }
+        }
+    }
+
     private void addFloatingButton(String label, String target, int glyph) {
         GlassCard button = glass(22); button.setFloatingStyle(true);
+        button.setSpotlightEnabled(true);
         button.setAmbientColor(0); button.setContentDescription(label);
         NavGlyphView icon = new NavGlyphView(this, glyph);
         button.addView(icon, new FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER));
@@ -902,7 +1064,19 @@ public final class Home extends Activity {
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(navExpandedSize, navExpandedSize);
         lp.leftMargin = dp(10); lp.rightMargin = dp(3);
-        floatingNav.addView(button, lp); navButtons.add(button); navTargets.add(target);
+        FrameLayout slot = new FrameLayout(this);
+        slot.setClipChildren(false); slot.setClipToPadding(false);
+        slot.setFocusable(false);
+        // Keep top controls at their original size. Focus is an in-circle
+        // highlight, not a large tile halo or a rectangular platform highlight.
+        slot.setClickable(false);
+        slot.setBackground(null);
+        slot.setForeground(null);
+        disablePlatformFocusHighlight(slot);
+        slot.addView(button, new FrameLayout.LayoutParams(MATCH, MATCH, Gravity.CENTER));
+        floatingNav.addView(slot, lp); navButtons.add(button); navTargets.add(target);
+        // Start dimmed, even before the first focus event.
+        button.applySpotlight(1f, .68f, 0f);
     }
 
     private void showPage(String requested) {
@@ -913,10 +1087,18 @@ public final class Home extends Activity {
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         if (homeClockTick != null) mainHandler.removeCallbacks(homeClockTick);
         homeClockView = null;
+        if (homeGreetingView != null) homeGreetingView.finishFocusReveal();
+        homeGreetingView = null;
         homeHeroView = null;
         final boolean pageChanged = !requested.equals(page);
+        final boolean enterHome = "home".equals(requested) && (pageChanged || pageHost.getChildCount() == 0);
+        clearGalleryPreview();
         page = requested; pageHost.removeAllViews(); searchField = null;
-        if (floatingNav != null) floatingNav.animate().cancel();
+        if (indexOfCard(navButtons, getCurrentFocus()) < 0) updateSpotlightGroup(navButtons, null);
+        if (floatingNav != null) {
+            floatingNav.animate().cancel();
+            floatingNav.setVisibility(View.VISIBLE); floatingNav.setAlpha(1f);
+        }
         applyNavScale(0f);
         for (int i = 0; i < navButtons.size(); i++) {
             navButtons.get(i).setActive(("settings".equals(page) || "background".equals(page)) && "settings".equals(navTargets.get(i)));
@@ -933,9 +1115,11 @@ public final class Home extends Activity {
             pageHost.setAlpha(0f); pageHost.setTranslationY(dp(10));
             pageHost.animate().alpha(1f).translationY(0f).setDuration(MOTION_PAGE_MS).setInterpolator(EASE_OUT).start();
         } else { pageHost.setAlpha(1f); pageHost.setTranslationY(0f); }
+        if (enterHome) playHomeGreeting();
         pageHost.post(() -> {
             View v = "search".equals(page) && searchField != null ? searchField
-                    : "home".equals(page) && !homeFavoriteCards.isEmpty() ? homeFavoriteCards.get(0) : firstFocusable(pageHost);
+                    : "home".equals(page) && !homeFavoriteCards.isEmpty() ? homeFavoriteCards.get(0)
+                    : "background".equals(page) && galleryInitialFocus != null ? galleryInitialFocus : firstFocusable(pageHost);
             if (v != null) v.requestFocus();
             if ("search".equals(page) && searchField != null) showSearchKeyboard();
         });
@@ -957,6 +1141,9 @@ public final class Home extends Activity {
         if (floatingNav != null) { floatingNav.setVisibility(View.VISIBLE); floatingNav.setAlpha(1f); }
         if (homeViewportAnimator != null) { ValueAnimator old = homeViewportAnimator; homeViewportAnimator = null; old.cancel(); }
         homeAllAppsExpanded = false; homeAllAppsBlur = null;
+        homeAllAppsGrid = null; homeAllAppsGridHost = null; allAppsPreviewInFlight = null;
+        allAppsCascadeProgress = 0f;
+        homeAllAppsTargetScroll = 0;
         applyWallpaperMotion(0f);
         homeScroll = new HomeScrollView(this);
         homeScroll.setFillViewport(true); homeScroll.setVerticalScrollBarEnabled(false);
@@ -967,14 +1154,21 @@ public final class Home extends Activity {
         LinearLayout hero = new LinearLayout(this); hero.setOrientation(LinearLayout.VERTICAL);
         homeHeroView = hero;
         hero.setPivotX(0f); hero.setPivotY(0f);
+        hero.setClipChildren(false); hero.setClipToPadding(false);
         hero.setLayerType(View.LAYER_TYPE_HARDWARE, null); // alpha + scale of text-with-shadow without re-rendering every frame
         homeClockView = text("", 42, 0xFFF6F8FF, Typeface.create("sans-serif-light", 0));
         // Tabular numerals keep the clock visually steady as minutes change.
         homeClockView.setFontFeatureSettings("'tnum'");
-        homeClockView.setShadowLayer(dp(10), 0, dp(2), 0xAA000000);
-        homeGreetingView = text(greetingText(), 24, 0xEAF6F8FF, Typeface.create("sans-serif-light", 0));
+        homeClockView.setLetterSpacing(-.025f);
+        homeClockView.setShadowLayer(dp(6), 0, dp(2), 0x88000000);
+        homeGreetingView = new CinematicGreetingView(this);
+        homeGreetingView.setText(greetingText());
+        homeGreetingView.setTextSize(22);
+        homeGreetingView.setTextColor(0xD9F6F8FF);
+        homeGreetingView.setTypeface(Typeface.create("sans-serif-light", 0));
+        homeGreetingView.setIncludeFontPadding(false);
         TextView title = homeGreetingView;
-        title.setShadowLayer(dp(8), 0, dp(2), 0x99000000);
+        title.setShadowLayer(dp(5), 0, dp(2), 0x77000000);
         hero.addView(homeClockView);
         LinearLayout.LayoutParams greetingLp = new LinearLayout.LayoutParams(WRAP, WRAP);
         greetingLp.topMargin = dp(5); hero.addView(title, greetingLp);
@@ -999,6 +1193,10 @@ public final class Home extends Activity {
             AppItem item = favorites.get(i);
             int tileHeight = favoriteTileHeights[i];
             GlassCard c = appCard(item, homeTileWidth, tileHeight);
+            c.setSpotlightEnabled(true);
+            // Start compact even before the first D-pad focus is assigned.
+            c.spotlightTarget = -1;
+            c.applySpotlight(SPOTLIGHT_DIM_SCALE, SPOTLIGHT_DIM_AMOUNT, 0f);
             c.setId(View.generateViewId());
             homeFavoriteCards.add(c);
             FrameLayout cell = new FrameLayout(this); cell.setClipChildren(false); cell.setClipToPadding(false);
@@ -1018,6 +1216,7 @@ public final class Home extends Activity {
         homeAllAppsSection = new FrameLayout(this) {
             @Override public boolean hasOverlappingRendering() { return false; } // alpha without a per-frame offscreen layer
         };
+        homeAllAppsSection.setClipChildren(false); homeAllAppsSection.setClipToPadding(false);
         LinearLayout allAppsContent = new LinearLayout(this); allAppsContent.setOrientation(LinearLayout.VERTICAL);
         allAppsContent.setClipChildren(false); allAppsContent.setClipToPadding(false);
         TextView allTitle = text("All Apps", 22, 0xFFF4F7FF, Typeface.create("sans-serif-light", 0));
@@ -1026,11 +1225,19 @@ public final class Home extends Activity {
         allTitle.setPadding(dp(44), dp(10), dp(24), dp(8));
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(MATCH, WRAP); titleLp.topMargin = dp(5);
         allAppsContent.addView(allTitle, titleLp);
-        LinearLayout grid = new LinearLayout(this); grid.setOrientation(LinearLayout.VERTICAL);
+        // Alpha must propagate to children: an offscreen alpha layer is bounded
+        // by this layout and clips tiles lifted/scaled outside it during scrolling.
+        LinearLayout grid = new LinearLayout(this) {
+            @Override public boolean hasOverlappingRendering() { return false; }
+        }; grid.setOrientation(LinearLayout.VERTICAL);
         grid.setPadding(dp(34), 0, dp(34), dp(28)); grid.setClipChildren(false); grid.setClipToPadding(false);
         int countPerRow = HOME_APPS_COLUMNS;
         for (int start = 0; start < homeAllApps.size(); start += countPerRow) {
-            LinearLayout row = new LinearLayout(this); row.setClipChildren(false); row.setClipToPadding(false);
+            // Keep orbit/counterflow artwork outside the row visible even when
+            // the cascade fades this row between alpha 0 and 1.
+            LinearLayout row = new LinearLayout(this) {
+                @Override public boolean hasOverlappingRendering() { return false; }
+            }; row.setClipChildren(false); row.setClipToPadding(false);
             int rowTileHeight = 0;
             for (int col = 0; col < countPerRow && start + col < homeAllApps.size(); col++)
                 rowTileHeight = Math.max(rowTileHeight, appTileHeightPixels(homeAllApps.get(start + col), homeTileWidth));
@@ -1040,7 +1247,8 @@ public final class Home extends Activity {
                 if (ix < homeAllApps.size()) {
                     AppItem item = homeAllApps.get(ix);
                     int tileHeight = appTileHeightPixels(item, homeTileWidth);
-                    GlassCard card = appCard(item, homeTileWidth, tileHeight); card.setId(View.generateViewId());
+                    GlassCard card = appCard(item, homeTileWidth, tileHeight);
+                    card.setSpotlightEnabled(true); card.setId(View.generateViewId());
                     card.setFocusable(false); card.setFocusableInTouchMode(false);
                     homeAllAppCards.add(card);
                     FrameLayout cell = new FrameLayout(this); cell.setClipChildren(false); cell.setClipToPadding(false);
@@ -1081,9 +1289,16 @@ public final class Home extends Activity {
                         : homeFavoriteCards.get(favoriteIndex).getId());
             }
         }
-        allAppsContent.addView(grid, new LinearLayout.LayoutParams(MATCH, WRAP));
+        // A separate preview layer keeps the heading sharp and avoids drawing
+        // sharp artwork through its own translucent blurred copy.
+        homeAllAppsGrid = grid;
+        homeAllAppsGridHost = new FrameLayout(this);
+        homeAllAppsGridHost.setClipChildren(false); homeAllAppsGridHost.setClipToPadding(false);
+        homeAllAppsGridHost.addView(grid, new FrameLayout.LayoutParams(MATCH, WRAP));
+        allAppsContent.addView(homeAllAppsGridHost, new LinearLayout.LayoutParams(MATCH, WRAP));
         homeAllAppsSection.addView(allAppsContent, new FrameLayout.LayoutParams(MATCH, WRAP));
-        homeAllAppsSection.setAlpha(.78f);
+        homeAllAppsSection.setAlpha(1f);
+        updateAllAppsPreview(0f);
         LinearLayout.LayoutParams allSectionLp = new LinearLayout.LayoutParams(MATCH, WRAP);
         content.addView(homeAllAppsSection, allSectionLp);
         homeScroll.addView(content, new ScrollView.LayoutParams(MATCH, WRAP));
@@ -1101,6 +1316,98 @@ public final class Home extends Activity {
         // Match the reference's landscape card ratio at the responsive six-column
         // width. Every Main Row and All Apps card gets this same computed height.
         return Math.max(1, Math.round(tileWidth / HOME_TILE_ASPECT_RATIO));
+    }
+
+    private void playHomeGreeting() {
+        if (!"home".equals(page) || homeGreetingView == null || homeAllAppsExpanded
+                || homeViewportAnimator != null || homeHasPaused) return;
+        homeGreetingView.requestFocusReveal();
+    }
+
+    /** One-shot greeting-only blur/fade. Fire OS 6 has no RenderEffect: prepare two
+     * tiny text bitmaps once per reveal, then composite them with alpha only. */
+    private final class CinematicGreetingView extends TextView {
+        private final Paint revealPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private Bitmap sharp, soft;
+        private int blurOffsetX, blurOffsetY;
+        private float revealProgress = 1f;
+        private ValueAnimator revealAnimator;
+        private boolean revealPending;
+
+        CinematicGreetingView(Context context) { super(context); }
+
+        void requestFocusReveal() {
+            if (revealPending || revealAnimator != null) return;
+            revealPending = true;
+            invalidate();
+        }
+
+        void finishFocusReveal() {
+            revealPending = false;
+            ValueAnimator old = revealAnimator;
+            revealAnimator = null;
+            if (old != null) old.cancel();
+            revealProgress = 1f;
+            // Let the renderer release these safely after the last display list.
+            sharp = null; soft = null;
+            invalidate();
+        }
+
+        private void startFocusReveal() {
+            revealPending = false;
+            int w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0 || getLayout() == null || w > 2048 || h > 256) return;
+            try {
+                sharp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                sharp.setDensity(getResources().getDisplayMetrics().densityDpi);
+                // Capture only the TextView content, including its existing font and shadow.
+                super.onDraw(new Canvas(sharp));
+                Paint blur = new Paint(Paint.ANTI_ALIAS_FLAG);
+                blur.setMaskFilter(new android.graphics.BlurMaskFilter(Math.max(1f, dpF(5f)),
+                        android.graphics.BlurMaskFilter.Blur.NORMAL));
+                int[] offset = new int[2];
+                soft = sharp.extractAlpha(blur, offset);
+                soft.setDensity(sharp.getDensity());
+                blurOffsetX = offset[0]; blurOffsetY = offset[1];
+            } catch (RuntimeException | OutOfMemoryError failure) {
+                sharp = null; soft = null; return;
+            }
+            revealProgress = 0f;
+            final ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
+            revealAnimator = a;
+            a.setDuration(GREETING_FOCUS_MS);
+            a.setInterpolator(EASE_OUT);
+            a.addUpdateListener(v -> { revealProgress = (Float) v.getAnimatedValue(); invalidate(); });
+            a.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator animation) {
+                    if (revealAnimator == a) finishFocusReveal();
+                }
+            });
+            a.start();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            if (revealPending) startFocusReveal();
+            if (sharp == null || soft == null || revealAnimator == null) {
+                super.onDraw(canvas); return;
+            }
+            float t = revealProgress;
+            int save = canvas.save();
+            canvas.translate(0f, dpF(3f) * (1f - t));
+            // Soft mask fades away as the original sharp text fades in.
+            revealPaint.setColor(getCurrentTextColor());
+            revealPaint.setAlpha(Math.round(255f * (1f - t) * Math.min(1f, t * 3f)));
+            canvas.drawBitmap(soft, blurOffsetX, blurOffsetY, revealPaint);
+            revealPaint.setColor(Color.WHITE);
+            revealPaint.setAlpha(Math.round(255f * t * t));
+            canvas.drawBitmap(sharp, 0f, 0f, revealPaint);
+            canvas.restoreToCount(save);
+        }
+
+        @Override protected void onDetachedFromWindow() {
+            finishFocusReveal();
+            super.onDetachedFromWindow();
+        }
     }
 
     private void updateHomeClock() {
@@ -1128,6 +1435,7 @@ public final class Home extends Activity {
         final int start = homeScroll.getScrollY();
         final int end = expand ? homeAllAppsTargetScroll : 0;
         homeAllAppsTransitionTargetExpanded = expand;
+        if (expand && homeGreetingView != null) homeGreetingView.finishFocusReveal();
         homeScroll.setSuppressFocusAutoScroll(true);
         if (homeChromeAutoHide && !expand && floatingNav != null) {
             floatingNav.setVisibility(View.VISIBLE);
@@ -1140,16 +1448,25 @@ public final class Home extends Activity {
         } else if (!homeFavoriteCards.isEmpty()) {
             homeFavoriteCards.get(Math.max(0, Math.min(lastFavoriteFocus, homeFavoriteCards.size() - 1))).requestFocus();
         }
-        // Keep one shared curve for the hero, icons, and background so they stay in sync.
+        // One viewport timer for the cinematic scale, fade and scroll. Other motion stays unchanged.
         ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
         homeViewportAnimator = animator;
         final float startFraction = homeAllAppsTargetScroll <= 0 ? 0f
                 : Math.max(0f, Math.min(1f, start / (float) homeAllAppsTargetScroll));
         final float endFraction = expand ? 1f : 0f;
+        final float cascadeStart = allAppsCascadeProgress;
         float travelShare = Math.abs(endFraction - startFraction);
         final long duration = Math.round(MOTION_VIEWPORT_MS * Math.max(.75f, Math.min(1f, travelShare)));
         animator.setDuration(duration);
         animator.setInterpolator(new LinearInterpolator());
+        final View fadeHero = homeHeroView;
+        final View fadeGreeting = homeGreetingView;
+        final float heroStartScale = fadeHero == null ? 1f : fadeHero.getScaleX();
+        final float heroStartAlpha = fadeHero == null ? 1f : fadeHero.getAlpha();
+        final float greetingStartAlpha = fadeGreeting == null ? 1f : fadeGreeting.getAlpha();
+        final float heroEndScale = 1f - (1f - HOME_HERO_COMPACT_SCALE) * endFraction;
+        final float heroEndAlpha = homeHeroAlpha(endFraction);
+        final float greetingEndAlpha = homeGreetingAlpha(endFraction);
         animateHomeChrome(expand, endFraction, duration);
         animateWallpaperMotion(expand, duration);
         final View glowAnchor = getCurrentFocus();
@@ -1158,18 +1475,21 @@ public final class Home extends Activity {
             float raw = (Float) a.getAnimatedValue();
             float eased = EASE_MOVE.getInterpolation(raw);
             float fraction = startFraction + (endFraction - startFraction) * eased;
+            if (fadeHero != null) {
+                float scale = heroStartScale + (heroEndScale - heroStartScale) * eased;
+                fadeHero.setScaleX(scale); fadeHero.setScaleY(scale);
+                fadeHero.setAlpha(heroStartAlpha + (heroEndAlpha - heroStartAlpha) * eased);
+            }
+            if (fadeGreeting != null) {
+                fadeGreeting.setAlpha(greetingStartAlpha + (greetingEndAlpha - greetingStartAlpha) * eased);
+            }
             int y = Math.round(homeAllAppsTargetScroll * fraction);
             homeScroll.scrollTo(0, y);
             homeHeroCollapseFraction = fraction;
             updateHomeHeroForScroll(homeScroll.getScrollY());
             if (homeFavoriteStrip != null) homeFavoriteStrip.setAlpha(homeChromeAutoHide ? 1f - fraction : 1f);
-            homeAllAppsSection.setAlpha(.78f + .22f * fraction);
-            if (homeAllAppsBlur != null) {
-                // INVISIBLE, never GONE: toggling GONE forces a full relayout in the middle of the scroll (the upward jitter).
-                int blurVisibility = fraction >= 1f ? View.INVISIBLE : View.VISIBLE;
-                if (homeAllAppsBlur.getVisibility() != blurVisibility) homeAllAppsBlur.setVisibility(blurVisibility);
-                homeAllAppsBlur.setAlpha(1f - fraction);
-            }
+            updateAllAppsPreview(fraction);
+            applyAllAppsCascade(cascadeStart + (endFraction - cascadeStart) * raw);
             if (glowFollows) ambientGlow.follow(glowAnchor);
         });
         animator.addListener(new AnimatorListenerAdapter() {
@@ -1180,14 +1500,18 @@ public final class Home extends Activity {
                 if (glowFollows) ambientGlow.settle(glowAnchor);
                 homeAllAppsExpanded = expand;
                 homeHeroCollapseFraction = expand ? 1f : 0f;
+                updateAllAppsPreview(homeHeroCollapseFraction);
+                applyAllAppsCascade(endFraction);
+                if (!expand && homeAllAppsBlur == null) scheduleAllAppsBlur(homeAllAppsSection, 0);
                 updateHomeHeroForScroll(homeScroll.getScrollY());
                 if (homeFavoriteStrip != null) homeFavoriteStrip.setAlpha(homeChromeAutoHide && expand ? 0f : 1f);
                 if (floatingNav != null) {
-                    floatingNav.setAlpha(homeChromeAutoHide && expand ? 0f : 1f);
-                    floatingNav.setVisibility(homeChromeAutoHide && expand ? View.INVISIBLE : View.VISIBLE);
+                    floatingNav.setAlpha(1f);
+                    floatingNav.setVisibility(View.VISIBLE);
                 }
                 if (!expand) {
                     for (GlassCard card : homeAllAppCards) { card.setFocusable(false); card.setFocusableInTouchMode(false); }
+                    playHomeGreeting();
                 }
             }
         });
@@ -1198,13 +1522,7 @@ public final class Home extends Activity {
     private void returnToFavorites() { animateHomeViewport(false); }
 
     private void animateHomeChrome(boolean expand, float targetFraction, long duration) {
-        float heroScale = 1f - (1f - HOME_HERO_COMPACT_SCALE) * targetFraction;
-        float chromeAlpha = homeChromeAutoHide ? 1f - targetFraction : 1f;
-        if (homeHeroView != null) {
-            homeHeroView.animate().cancel();
-            homeHeroView.animate().scaleX(heroScale).scaleY(heroScale).alpha(chromeAlpha)
-                    .setDuration(duration).setInterpolator(EASE_MOVE).start();
-        }
+        float chromeAlpha = 1f; // individual top icons own their spotlight opacity
         if (floatingNav != null) {
             float navScale = 1f - (1f - navCompactSize / (float) navExpandedSize) * targetFraction;
             setFloatingNavPivot();
@@ -1215,23 +1533,16 @@ public final class Home extends Activity {
     }
 
     private void animateWallpaperMotion(boolean expand, long duration) {
-        float amount = expand ? 1f : 0f;
-        float scale = 1f + .13f * amount;
-        float parallaxY = -dp(4f) * amount;
-        wallpaperBlurAmount = .18f * amount;
+        // Cinematic Zoom + Dim: only native scale and opacity, no live blur.
         if (wallpaperView != null) {
+            float scale = expand ? ALL_APPS_WALLPAPER_ZOOM : 1f;
             wallpaperView.animate().cancel();
-            wallpaperView.animate().scaleX(scale).scaleY(scale).translationY(parallaxY)
+            wallpaperView.animate().scaleX(scale).scaleY(scale)
                     .setDuration(duration).setInterpolator(EASE_MOVE).start();
-        }
-        if (wallpaperBlurView != null) {
-            wallpaperBlurView.animate().cancel();
-            wallpaperBlurView.animate().scaleX(scale).scaleY(scale).translationY(parallaxY)
-                    .alpha(wallpaperBlurAmount).setDuration(duration).setInterpolator(EASE_MOVE).start();
         }
         if (wallpaperTransitionShade != null) {
             wallpaperTransitionShade.animate().cancel();
-            wallpaperTransitionShade.animate().alpha(.065f * amount)
+            wallpaperTransitionShade.animate().alpha(expand ? ALL_APPS_WALLPAPER_SHADE : 0f)
                     .setDuration(duration).setInterpolator(EASE_MOVE).start();
         }
     }
@@ -1253,73 +1564,191 @@ public final class Home extends Activity {
         if (index >= 0) lastFavoriteFocus = Math.min(index % HOME_APPS_COLUMNS, homeFavoriteCards.size() - 1);
     }
 
-    /** Waits until the section has a real size (retrying), so the blur is never silently skipped. */
+    /** A single cached, bounded bitmap; only opacity changes during navigation. */
     private void scheduleAllAppsBlur(final FrameLayout section, final int attempt) {
+        if (section == null || homeAllAppsGrid == null || homeAllAppsBlur != null) return;
+        final LinearLayout grid = homeAllAppsGrid;
         section.postDelayed(() -> {
-            if (section != homeAllAppsSection) return; // page was rebuilt meanwhile
-            if (section.getWidth() <= 0 || section.getHeight() <= 0 || !section.isAttachedToWindow()) {
-                if (attempt < 25) scheduleAllAppsBlur(section, attempt + 1);
+            if (!"home".equals(page) || section != homeAllAppsSection || grid != homeAllAppsGrid
+                    || homeAllAppsBlur != null || allAppsPreviewInFlight == grid) return;
+            if (homeAllAppsExpanded || homeAllAppsTransitionTargetExpanded && homeViewportAnimator != null) return;
+            if (!grid.isAttachedToWindow() || grid.getWidth() <= 0 || grid.getHeight() <= 0
+                    || homeViewportAnimator != null) {
+                if (attempt < 12) scheduleAllAppsBlur(section, attempt + 1);
                 return;
             }
-            try { createAllAppsBlurPreview(); } catch (RuntimeException | OutOfMemoryError e) { if (attempt < 3) scheduleAllAppsBlur(section, attempt + 1); }
-        }, attempt == 0 ? 60 : 120);
+            createAllAppsBlurPreview(grid, homeAllAppsGridHost);
+        }, attempt == 0 ? 100 : 120);
     }
 
-    /** Pure-Java box blur fallback (3 passes) for devices where RenderScript fails. */
+    /** Three separable box passes approximate Gaussian blur in O(width * height). */
     private void boxBlur(Bitmap bmp, int r) {
-        int w = bmp.getWidth(), h = bmp.getHeight(); int[] px = new int[w * h], tmp = new int[w * h];
+        int w = bmp.getWidth(), h = bmp.getHeight();
+        int[] px = new int[w * h], tmp = new int[w * h];
         bmp.getPixels(px, 0, w, 0, 0, w, h);
         for (int pass = 0; pass < 3; pass++) {
-            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
-                int a=0,rr=0,g=0,b=0,n=0;
-                for (int k = -r; k <= r; k++) { int xx = Math.min(w-1, Math.max(0, x+k)); int c = px[y*w+xx]; a+=c>>>24; rr+=(c>>16)&255; g+=(c>>8)&255; b+=c&255; n++; }
-                tmp[y*w+x] = ((a/n)<<24)|((rr/n)<<16)|((g/n)<<8)|(b/n);
-            }
-            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
-                int a=0,rr=0,g=0,b=0,n=0;
-                for (int k = -r; k <= r; k++) { int yy = Math.min(h-1, Math.max(0, y+k)); int c = tmp[yy*w+x]; a+=c>>>24; rr+=(c>>16)&255; g+=(c>>8)&255; b+=c&255; n++; }
-                px[y*w+x] = ((a/n)<<24)|((rr/n)<<16)|((g/n)<<8)|(b/n);
-            }
+            blurPass(px, tmp, w, h, r, false);
+            blurPass(tmp, px, w, h, r, true);
         }
         bmp.setPixels(px, 0, w, 0, 0, w, h);
     }
 
-    private void createAllAppsBlurPreview() {
-        if (homeAllAppsSection == null || homeAllAppsSection.getWidth() <= 0 || homeAllAppsSection.getHeight() <= 0) return;
-        if (homeAllAppsBlur != null) { homeAllAppsSection.removeView(homeAllAppsBlur); homeAllAppsBlur = null; }
-        int width = Math.max(1, homeAllAppsSection.getWidth() / 4);
-        int height = Math.max(1, homeAllAppsSection.getHeight() / 4);
-        Bitmap low = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(low);
-        canvas.scale(width / (float) homeAllAppsSection.getWidth(), height / (float) homeAllAppsSection.getHeight());
-        homeAllAppsSection.draw(canvas);
-        Bitmap blurred = null;
-        RenderScript rs = null;
-        try {
-            rs = RenderScript.create(this);
-            Allocation input = Allocation.createFromBitmap(rs, low);
-            Allocation output = Allocation.createTyped(rs, input.getType());
-            ScriptIntrinsicBlur blur = ScriptIntrinsicBlur.create(rs, Element.U8_4(rs));
-            blur.setRadius(18f); blur.setInput(input); blur.forEach(output);
-            output.copyTo(low);
-            input.destroy(); output.destroy(); blur.destroy();
-            blurred = low;
-        } catch (RuntimeException | LinkageError ignored) {
-            boxBlur(low, 3);
-            blurred = low;
-        } finally {
-            if (rs != null) rs.destroy();
-            if (low != blurred && !low.isRecycled()) low.recycle();
+    private static void blurPass(int[] src, int[] dst, int w, int h, int r, boolean vertical) {
+        int lines = vertical ? w : h, length = vertical ? h : w;
+        int stride = vertical ? w : 1, n = 2 * r + 1;
+        for (int line = 0; line < lines; line++) {
+            int base = vertical ? line : line * w;
+            int a = 0, red = 0, green = 0, blue = 0;
+            for (int k = -r; k <= r; k++) {
+                int c = src[base + Math.min(length - 1, Math.max(0, k)) * stride];
+                a += c >>> 24; red += (c >>> 16) & 255; green += (c >>> 8) & 255; blue += c & 255;
+            }
+            for (int i = 0; i < length; i++) {
+                dst[base + i * stride] = ((a / n) << 24) | ((red / n) << 16) | ((green / n) << 8) | (blue / n);
+                int leave = src[base + Math.max(0, i - r) * stride];
+                int enter = src[base + Math.min(length - 1, i + r + 1) * stride];
+                a += (enter >>> 24) - (leave >>> 24);
+                red += ((enter >>> 16) & 255) - ((leave >>> 16) & 255);
+                green += ((enter >>> 8) & 255) - ((leave >>> 8) & 255);
+                blue += (enter & 255) - (leave & 255);
+            }
         }
-        if (homeAllAppsSection == null || blurred == null) return;
-        ImageView overlay = new ImageView(this); overlay.setScaleType(ImageView.ScaleType.FIT_XY);
-        overlay.setImageBitmap(blurred); overlay.setFocusable(false); overlay.setClickable(false);
-        overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        homeAllAppsSection.addView(overlay, new FrameLayout.LayoutParams(MATCH, MATCH));
-        homeAllAppsBlur = overlay;
-        boolean expanded = homeScroll != null && homeAllAppsTargetScroll > 0 && homeScroll.getScrollY() >= homeAllAppsTargetScroll;
-        homeAllAppsBlur.setVisibility(expanded ? View.INVISIBLE : View.VISIBLE);
-        homeAllAppsBlur.setAlpha(expanded ? 0f : 1f);
+    }
+
+    /** A muted, feathered preview of the first two rows, not a blurred full-height grid.
+     * Keeping a fixed sampling density avoids the previous smearing when many apps are installed. */
+    private void createAllAppsBlurPreview(final LinearLayout grid, final FrameLayout host) {
+        if (host == null || homeAllAppCards.isEmpty() || grid.getChildCount() == 0) return;
+        final int previewHeight = Math.min(grid.getHeight(),
+                grid.getChildAt(Math.min(1, grid.getChildCount() - 1)).getBottom() + dp(12));
+        if (previewHeight <= 0 || grid.getWidth() <= 0) return;
+        final Bitmap low;
+        final int blurRadius, featherTop, featherBottom, featherSide;
+        try {
+            float sampleScale = Math.min(.5f, Math.min(640f / grid.getWidth(), 256f / previewHeight));
+            int width = Math.max(1, Math.round(grid.getWidth() * sampleScale));
+            int height = Math.max(1, Math.round(previewHeight * sampleScale));
+            low = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(low);
+            canvas.scale(width / (float) grid.getWidth(), height / (float) previewHeight);
+            // Draw only the bounded preview region once; never blur while scrolling.
+            canvas.clipRect(0, 0, grid.getWidth(), previewHeight);
+            try { grid.draw(canvas); }
+            catch (RuntimeException | OutOfMemoryError e) { low.recycle(); return; }
+            blurRadius = Math.max(1, Math.round(dp(4.5f) * sampleScale));
+            featherTop = Math.max(2, Math.round(dp(26) * sampleScale));
+            featherBottom = Math.max(2, Math.round(dp(24) * sampleScale));
+            featherSide = Math.max(2, Math.round(dp(14) * sampleScale));
+        } catch (RuntimeException | OutOfMemoryError e) { return; }
+        allAppsPreviewInFlight = grid;
+        WALLPAPER_BLUR_EXECUTOR.execute(() -> {
+            boolean success = false;
+            try {
+                softenAllAppsPreview(low, blurRadius, featherTop, featherBottom, featherSide);
+                success = true;
+            } catch (RuntimeException | OutOfMemoryError ignored) { }
+            final boolean ready = success;
+            mainHandler.post(() -> {
+                if (allAppsPreviewInFlight == grid) allAppsPreviewInFlight = null;
+                if (!ready || isFinishing() || isDestroyed() || !"home".equals(page)
+                        || grid != homeAllAppsGrid || host != homeAllAppsGridHost || !host.isAttachedToWindow()) {
+                    low.recycle(); return;
+                }
+                ImageView overlay = new ImageView(this);
+                overlay.setScaleType(ImageView.ScaleType.FIT_XY);
+                overlay.setImageBitmap(low);
+                if (overlay.getDrawable() instanceof BitmapDrawable)
+                    ((BitmapDrawable) overlay.getDrawable()).setFilterBitmap(true);
+                overlay.setAlpha(0f);
+                overlay.setFocusable(false); overlay.setClickable(false);
+                overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                host.addView(overlay, new FrameLayout.LayoutParams(MATCH, previewHeight, Gravity.TOP));
+                homeAllAppsBlur = overlay;
+                updateAllAppsPreview(homeHeroCollapseFraction);
+            });
+        });
+    }
+
+    private static float previewSmoothstep(float value) {
+        float t = Math.max(0f, Math.min(1f, value));
+        return t * t * (3f - 2f * t);
+    }
+
+    /** Blur premultiplied colors, then bake in a soft opacity mask and muted tone.
+     * All of this is done once on the worker, so navigation only animates opacity. */
+    private static void softenAllAppsPreview(Bitmap bmp, int radius, int top, int bottom, int side) {
+        int w = bmp.getWidth(), h = bmp.getHeight();
+        int[] pixels = new int[w * h], scratch = new int[w * h];
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h);
+        for (int i = 0; i < pixels.length; i++) {
+            int c = pixels[i], a = c >>> 24;
+            pixels[i] = (a << 24) | (((((c >>> 16) & 255) * a + 127) / 255) << 16)
+                    | (((((c >>> 8) & 255) * a + 127) / 255) << 8) | (((c & 255) * a + 127) / 255);
+        }
+        for (int pass = 0; pass < 3; pass++) {
+            blurPass(pixels, scratch, w, h, radius, false);
+            blurPass(scratch, pixels, w, h, radius, true);
+        }
+        float[] edge = new float[w];
+        for (int x = 0; x < w; x++) edge[x] = previewSmoothstep(Math.min(x, w - 1 - x) / (float) side);
+        for (int y = 0; y < h; y++) {
+            float feather = previewSmoothstep(y / (float) top)
+                    * previewSmoothstep((h - 1 - y) / (float) bottom);
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x, c = pixels[i], a = c >>> 24;
+                if (a == 0) { pixels[i] = 0; continue; }
+                float r = Math.min(255f, ((c >>> 16) & 255) * 255f / a);
+                float g = Math.min(255f, ((c >>> 8) & 255) * 255f / a);
+                float b = Math.min(255f, (c & 255) * 255f / a);
+                float luma = .2126f * r + .7152f * g + .0722f * b;
+                // Preserve the app colors but tame white glare and saturated streaks.
+                int red = Math.round((luma + (r - luma) * .72f) * .76f);
+                int green = Math.round((luma + (g - luma) * .72f) * .76f);
+                int blue = Math.round((luma + (b - luma) * .72f) * .76f);
+                int alpha = Math.round(a * feather * edge[x]);
+                pixels[i] = Color.argb(alpha, red, green, blue);
+            }
+        }
+        bmp.setPixels(pixels, 0, w, 0, 0, w, h);
+    }
+
+    /** First visible rows rise and fade in succession on the existing viewport timer.
+     * Reverse the same timeline on UP; no delayed callbacks or extra animators. */
+    private void applyAllAppsCascade(float progress) {
+        allAppsCascadeProgress = Math.max(0f, Math.min(1f, progress));
+        if (homeAllAppsGrid == null) return;
+        int count = Math.min(ALL_APPS_CASCADE_ROWS, homeAllAppsGrid.getChildCount());
+        float elapsed = allAppsCascadeProgress * MOTION_VIEWPORT_MS;
+        float rowDuration = MOTION_VIEWPORT_MS - Math.max(0, count - 1) * ALL_APPS_CASCADE_DELAY_MS;
+        for (int i = 0; i < count; i++) {
+            View row = homeAllAppsGrid.getChildAt(i);
+            // Restore neutral properties at rest: the hidden grid is also the
+            // source for the cached collapsed-home blur snapshot.
+            if (allAppsCascadeProgress <= 0f || allAppsCascadeProgress >= 1f) {
+                row.setAlpha(1f);
+                row.setTranslationY(0f);
+                continue;
+            }
+            float local = Math.max(0f, Math.min(1f,
+                    (elapsed - i * ALL_APPS_CASCADE_DELAY_MS) / rowDuration));
+            float reveal = EASE_OUT.getInterpolation(local);
+            row.setAlpha(reveal);
+            row.setTranslationY(dpF(24f) * (1f - reveal));
+        }
+    }
+
+    private void updateAllAppsPreview(float fraction) {
+        float f = Math.max(0f, Math.min(1f, fraction));
+        if (homeAllAppsTitle != null) homeAllAppsTitle.setAlpha(.78f + .22f * f);
+        if (homeAllAppsGrid == null) return;
+        // Reveal the real artwork early in the scroll, with no sharp flash while
+        // the cached preview is being prepared. Expanded mode has no blur overlay.
+        float reveal = previewSmoothstep(f / .85f);
+        homeAllAppsGrid.setAlpha(reveal);
+        if (homeAllAppsBlur == null) return;
+        homeAllAppsBlur.setAlpha(.60f * (1f - reveal));
+        int visibility = reveal >= 1f ? View.INVISIBLE : View.VISIBLE;
+        if (homeAllAppsBlur.getVisibility() != visibility) homeAllAppsBlur.setVisibility(visibility);
     }
 
     private void buildApps() {
@@ -1656,7 +2085,11 @@ public final class Home extends Activity {
                 .setPositiveButton("Save", (dialog, which) -> {
                     String name = input.getText() == null ? "" : input.getText().toString().trim();
                     prefs.edit().putString(DISPLAY_NAME_KEY, name).putBoolean(NAME_SETUP_COMPLETE, true).apply();
-                    if (homeGreetingView != null) homeGreetingView.setText(greetingText());
+                    if (homeGreetingView != null) {
+                        homeGreetingView.finishFocusReveal();
+                        homeGreetingView.setText(greetingText());
+                        if (!homeAllAppsExpanded && homeViewportAnimator == null) playHomeGreeting();
+                    }
                     Toast.makeText(this, name.isEmpty() ? "Greeting cleared" : "Greeting name saved", Toast.LENGTH_SHORT).show();
                 });
         if (firstRun) {
@@ -1680,10 +2113,33 @@ public final class Home extends Activity {
             list.setLayoutParams(params);
         });
         addSettingsAction(list, "Greeting name", "Choose the name shown on your home screen", "R", () -> promptForGreetingName(false));
+        addSettingsAction(list, "App Animation", getAnimationProfileDescription(), "▶", this::showAnimationProfilePicker);
         addSettingsAction(list, "Focus Effect Colour", "Current: " + FOCUS_EFFECT_COLOR_NAMES[getFocusEffectColorIndex()], "●", this::showFocusEffectColorPicker);
         addSettingsAction(list, "Background", "Choose a photo from your Fire TV folder", "◐", () -> showPage("background"));
         addSettingsAction(list, "Amazon Home", "Return to the original Fire TV home screen", "⌂", this::openAmazonHome);
         pageHost.addView(column, new LinearLayout.LayoutParams(MATCH, MATCH));
+    }
+
+    private boolean isClassicAnimationProfile() {
+        return prefs != null && prefs.getBoolean(ANIMATION_PROFILE_KEY, false);
+    }
+
+    private String getAnimationProfileDescription() {
+        return isClassicAnimationProfile() ? "Previous: orbit tilt and lift" : "Current: counterflow focus effect";
+    }
+
+    private void showAnimationProfilePicker() {
+        final String[] options = {"Current — counterflow focus effect", "Previous — orbit tilt and lift"};
+        new AlertDialog.Builder(this)
+                .setTitle("App Animation")
+                .setSingleChoiceItems(options, isClassicAnimationProfile() ? 1 : 0, (dialog, index) -> {
+                    prefs.edit().putBoolean(ANIMATION_PROFILE_KEY, index == 1).apply();
+                    dialog.dismiss();
+                    Toast.makeText(this, index == 1 ? "Previous orbit animation selected" : "Current focus animation selected", Toast.LENGTH_SHORT).show();
+                    mainHandler.post(() -> { if ("settings".equals(page)) showPage("settings"); });
+                })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     private int getFocusEffectColorIndex() {
@@ -1728,70 +2184,261 @@ public final class Home extends Activity {
     }
 
     private void buildBackgrounds() {
-        LinearLayout column = pageColumn(); column.addView(pageTitle("Background", "Choose a photo for your home screen."));
-        HorizontalScrollView scroll = new HorizontalScrollView(this); scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setClipChildren(false); scroll.setClipToPadding(false); scroll.setPadding(0, dp(18), dp(24), dp(8));
-        bindNavToScroll(scroll);
-        LinearLayout strip = new LinearLayout(this); strip.setClipChildren(false);
-        GlassCard defaultWallpaper = wallpaperCard(BUILTIN, "Default background", true);
-        defaultWallpaper.setOnClickListener(v -> chooseWallpaper(BUILTIN));
-        strip.addView(defaultWallpaper, new LinearLayout.LayoutParams(dp(240), dp(132)));
-        GlassCard transfer = glass(18); transfer.setFocusable(true); transfer.setContentDescription("Transfer from Phone/PC");
-        LinearLayout transferContent = new LinearLayout(this); transferContent.setOrientation(LinearLayout.VERTICAL); transferContent.setGravity(Gravity.CENTER);
-        TextView transferGlyph = text("⇧", 34, 0xFFFFD49A, Typeface.create("sans-serif-light", 0)); transferGlyph.setGravity(Gravity.CENTER);
-        TextView transferLabel = text("Transfer from Phone/PC", 14, 0xFFF5F5F5, Typeface.create("sans-serif-medium", 0)); transferLabel.setGravity(Gravity.CENTER);
-        transferLabel.setMaxLines(1); transferContent.addView(transferGlyph); transferContent.addView(transferLabel);
-        transfer.addView(transferContent, new FrameLayout.LayoutParams(MATCH, MATCH));
-        transfer.setOnClickListener(v -> startWallpaperTransfer());
-        LinearLayout.LayoutParams transferLp = new LinearLayout.LayoutParams(dp(240), dp(132)); transferLp.leftMargin = dp(14); strip.addView(transfer, transferLp);
-        transfer.setTag("__transfer_wallpaper__");
-        File dir = wallpaperDir(); File[] files = dir.listFiles();
-        if (files != null) for (File f : files) if (isImage(f) && !BUILTIN.equalsIgnoreCase(f.getName())) {
-            GlassCard card = wallpaperCard(f.getName(), "Your photo", false);
-            card.setTag(f.getName());
-            card.setOnClickListener(v -> chooseWallpaper(f.getName()));
-            card.setOnLongClickListener(v -> { confirmDeleteWallpaper(f.getName()); return true; });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(240), dp(132)); lp.leftMargin = dp(14); strip.addView(card, lp);
+        FrameLayout gallery = new FrameLayout(this);
+        gallery.setClipChildren(false); gallery.setClipToPadding(false);
+        // Full-screen preview lives only on this page; preferences are untouched until SELECT.
+        galleryPreviewBack = new ImageView(this);
+        galleryPreviewFront = new ImageView(this);
+        for (ImageView layer : new ImageView[] {galleryPreviewBack, galleryPreviewFront}) {
+            layer.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            layer.setAlpha(0f); layer.setFocusable(false);
+            gallery.addView(layer, new FrameLayout.LayoutParams(MATCH, MATCH));
         }
-        for (int i = 0; i < strip.getChildCount(); i++) strip.getChildAt(i).setId(View.generateViewId());
+        View shade = new View(this);
+        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0x96000000, 0x10000000, 0x08000000, 0xED000000}));
+        gallery.addView(shade, new FrameLayout.LayoutParams(MATCH, MATCH));
+        View heading = pageTitle("Background", "Explore and personalize your home screen.");
+        FrameLayout.LayoutParams headingLp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.LEFT);
+        headingLp.topMargin = dp(23); headingLp.leftMargin = dp(42); gallery.addView(heading, headingLp);
+
+        // Centered carousel: the focused card grows while its neighbours recede.
+        // Preserve the full-screen live preview, explicit apply and transfer actions.
+        LinearLayout center = new LinearLayout(this); center.setOrientation(LinearLayout.VERTICAL);
+        center.setGravity(Gravity.CENTER_HORIZONTAL);
+        center.setClipChildren(false); center.setClipToPadding(false);
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int cardWidth = Math.max(1, Math.min(dp(300), Math.round(screenWidth * .24f)));
+        int cardHeight = Math.max(1, Math.round(cardWidth / HOME_TILE_ASPECT_RATIO));
+        GalleryCarouselScroll scroll = new GalleryCarouselScroll(this, cardWidth);
+        scroll.setHorizontalScrollBarEnabled(false); scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setClipChildren(false); scroll.setClipToPadding(false); scroll.setFocusable(false);
+        scroll.setSmoothScrollingEnabled(false); // our centering animator owns scrollX
+        LinearLayout strip = new LinearLayout(this); strip.setGravity(Gravity.CENTER_VERTICAL);
+        strip.setClipChildren(false); strip.setClipToPadding(false);
+        int sidePadding = Math.max(0, (screenWidth - cardWidth) / 2);
+        strip.setPadding(sidePadding, 0, sidePadding, 0);
+
+        GlassCard transfer = glass(16); transfer.setId(View.generateViewId());
+        transfer.setContentDescription("Transfer from Phone/PC");
+        TextView transferLabel = text("+  Transfer from Phone/PC", 14, Color.WHITE, Typeface.create("sans-serif-medium", 0));
+        transferLabel.setGravity(Gravity.CENTER);
+        transfer.addView(transferLabel, new FrameLayout.LayoutParams(MATCH, MATCH));
+        transfer.setOnClickListener(v -> startWallpaperTransfer());
+
+        List<String> files = new ArrayList<>(); files.add(BUILTIN);
+        File[] photos = wallpaperDir().listFiles();
+        if (photos != null) {
+            Arrays.sort(photos, (a,b) -> a.getName().compareToIgnoreCase(b.getName()));
+            for (File f : photos) if (isImage(f) && !BUILTIN.equalsIgnoreCase(f.getName())) files.add(f.getName());
+        }
+        String selected = selectedWallpaper();
+        for (int i = 0; i < files.size(); i++) {
+            String file = files.get(i);
+            FrameLayout card = galleryWallpaperCard(file, file.equals(selected));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(cardWidth, cardHeight);
+            if (i < files.size() - 1) lp.rightMargin = dp(22);
+            strip.addView(card, lp);
+            card.setNextFocusUpId(transfer.getId()); card.setNextFocusDownId(transfer.getId());
+            if (galleryInitialFocus == null || file.equals(selected)) galleryInitialFocus = card;
+        }
         for (int i = 0; i < strip.getChildCount(); i++) {
             View item = strip.getChildAt(i);
-            int left = strip.getChildAt(Math.max(0, i - 1)).getId();
-            int right = strip.getChildAt(Math.min(strip.getChildCount() - 1, i + 1)).getId();
-            item.setNextFocusLeftId(left);
-            item.setNextFocusRightId(right);
+            item.setNextFocusLeftId(strip.getChildAt(Math.max(0, i - 1)).getId());
+            item.setNextFocusRightId(strip.getChildAt(Math.min(strip.getChildCount() - 1, i + 1)).getId());
         }
-        scroll.addView(strip); column.addView(scroll, new LinearLayout.LayoutParams(MATCH, WRAP));
-        TextView note = text("Choose a photo to apply it. Long-press a photo to delete it. Transfer images over Wi-Fi or copy them into the PC wallpapers folder and run sync-wallpapers.ps1.", 13, 0xDFFFFFFF, Typeface.create("sans-serif-light", 0));
-        note.setLineSpacing(dp(4), 1); LinearLayout.LayoutParams noteLp = new LinearLayout.LayoutParams(dp(900), WRAP); noteLp.topMargin = dp(12); column.addView(note, noteLp);
-        pageHost.addView(column, new LinearLayout.LayoutParams(MATCH, MATCH));
-        defaultWallpaper.setTag(BUILTIN);
-        String selected = selectedWallpaper();
-        column.post(() -> {
-            for (int i = 0; i < strip.getChildCount(); i++) {
-                View candidate = strip.getChildAt(i);
-                if (selected.equals(candidate.getTag())) { candidate.requestFocus(); return; }
-            }
-            defaultWallpaper.requestFocus();
-        });
+        if (galleryInitialFocus != null) {
+            transfer.setNextFocusUpId(galleryInitialFocus.getId());
+            transfer.setNextFocusDownId(galleryInitialFocus.getId());
+        }
+        scroll.addView(strip, new FrameLayout.LayoutParams(WRAP, MATCH));
+        center.addView(scroll, new LinearLayout.LayoutParams(MATCH, Math.round(cardHeight * 1.26f) + dp(16)));
+        galleryName = text("", 27, Color.WHITE, Typeface.create("sans-serif-light", 0));
+        galleryName.setGravity(Gravity.CENTER); galleryName.setSingleLine(true);
+        galleryName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        galleryName.setShadowLayer(dp(5), 0, dp(2), 0xAA000000);
+        galleryName.setPadding(dp(42), 0, dp(42), 0);
+        galleryStatus = text("", 13, 0xDFFFFFFF, Typeface.create("sans-serif", 0));
+        galleryStatus.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        nameLp.topMargin = dp(12); center.addView(galleryName, nameLp);
+        LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        statusLp.topMargin = dp(4); center.addView(galleryStatus, statusLp);
+        gallery.addView(center, new FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER));
+
+        LinearLayout footer = new LinearLayout(this); footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.setPadding(dp(42), 0, dp(42), dp(18));
+        TextView hint = text("SELECT to apply  •  Hold SELECT to delete a photo  •  BACK to return", 12,
+                0xBDFFFFFF, Typeface.create("sans-serif", 0));
+        footer.addView(hint, new LinearLayout.LayoutParams(0, WRAP, 1f));
+        LinearLayout.LayoutParams transferLp = new LinearLayout.LayoutParams(dp(220), dp(40));
+        transferLp.leftMargin = dp(16); footer.addView(transfer, transferLp);
+        gallery.addView(footer, new FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM));
+        pageHost.addView(gallery, new LinearLayout.LayoutParams(MATCH, MATCH));
+        showGalleryPreview(files.contains(selected) ? selected : BUILTIN);
     }
 
-    private GlassCard wallpaperCard(String file, String subtitle, boolean bundled) {
-        GlassCard card = glass(18); card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView preview = new ImageView(this); preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        if (bundled) preview.setImageResource(R.drawable.doom);
-        else loadWallpaperThumbnail(preview, new File(wallpaperDir(), file));
-        LinearLayout.LayoutParams imageLp = new LinearLayout.LayoutParams(dp(88), dp(88)); imageLp.rightMargin = dp(12); row.addView(preview, imageLp);
-        LinearLayout labels = new LinearLayout(this); labels.setOrientation(LinearLayout.VERTICAL);
-        TextView name = text(bundled ? "Doom" : file, 15, 0xFFF5F5F5, Typeface.create("sans-serif-medium", 0)); name.setMaxLines(1);
-        boolean selected = file.equalsIgnoreCase(selectedWallpaper());
-        TextView detail = text(selected ? "✓  CURRENT BACKGROUND" : "Tap to use · Long-press to delete", 12,
-                selected ? 0xFFFFD49A : 0xCFFFFFFF, Typeface.create(selected ? "sans-serif-medium" : "sans-serif-light", 0));
-        labels.addView(name); LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(WRAP, WRAP); dlp.topMargin = dp(5); labels.addView(detail, dlp);
-        row.addView(labels, new LinearLayout.LayoutParams(0, WRAP, 1)); card.addView(row, new FrameLayout.LayoutParams(MATCH, MATCH));
-        card.setContentDescription((bundled ? "Default background" : file) + (selected ? ", current background" : ", long press to delete"));
-        card.setActive(selected); return card;
+    private FrameLayout galleryWallpaperCard(String file, boolean selected) {
+        FrameLayout card = new FrameLayout(this);
+        card.setId(View.generateViewId()); card.setFocusable(true); card.setClickable(true);
+        card.setBackground(round(0xFF182124, dp(9))); card.setClipToOutline(true);
+        disablePlatformFocusHighlight(card);
+        ImageView thumbnail = new ImageView(this); thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        if (BUILTIN.equals(file)) thumbnail.setImageResource(R.drawable.doom);
+        else loadWallpaperThumbnail(thumbnail, new File(wallpaperDir(), file));
+        card.addView(thumbnail, new FrameLayout.LayoutParams(MATCH, MATCH));
+        if (selected) {
+            TextView tick = text("✓", 13, 0xFF183329, Typeface.DEFAULT_BOLD);
+            tick.setGravity(Gravity.CENTER); tick.setBackground(round(0xFFF1F8F4, dp(11)));
+            FrameLayout.LayoutParams tickLp = new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP | Gravity.RIGHT);
+            tickLp.topMargin = dp(5); tickLp.rightMargin = dp(5); card.addView(tick, tickLp);
+        }
+        GradientDrawable border = round(Color.TRANSPARENT, dp(9));
+        border.setStroke(dp(1), 0x55FFFFFF); card.setForeground(border); card.setAlpha(.50f);
+        card.setScaleX(.85f); card.setScaleY(.85f);
+        card.setContentDescription((BUILTIN.equals(file) ? "Doom" : file) + (selected ? ", current background" : ", preview"));
+        card.setOnFocusChangeListener((v, focused) -> {
+            border.setStroke(dp(focused ? 2 : 1), focused ? Color.WHITE : 0x55FFFFFF);
+            card.animate().cancel();
+            card.setTranslationZ(focused ? dp(4) : 0f);
+            card.animate().alpha(focused ? 1f : .50f).scaleX(focused ? 1.19f : .85f)
+                    .scaleY(focused ? 1.19f : .85f).setDuration(280L).setInterpolator(EASE_MOVE).start();
+            if (focused) {
+                if (card.getParent() instanceof View && ((View) card.getParent()).getParent() instanceof GalleryCarouselScroll) {
+                    GalleryCarouselScroll carousel = (GalleryCarouselScroll) ((View) card.getParent()).getParent();
+                    carousel.post(() -> { if (card.hasFocus()) carousel.centerOn(card); });
+                }
+                transferGalleryFocus(card); showGalleryPreview(file);
+            }
+        });
+        card.setOnClickListener(v -> chooseWallpaper(file));
+        if (!BUILTIN.equals(file)) card.setOnLongClickListener(v -> { confirmDeleteWallpaper(file); return true; });
+        return card;
+    }
+
+    private void transferGalleryFocus(View card) {
+        // Keep the transfer action's DOWN route tied to the last browsed thumbnail.
+        View transfer = pageHost.findViewById(card.getNextFocusUpId());
+        if (transfer != null) {
+            transfer.setNextFocusDownId(card.getId());
+            transfer.setNextFocusUpId(card.getId());
+        }
+    }
+
+    /** A single scroll animator that retargets from the current position on D-pad repeats. */
+    private final class GalleryCarouselScroll extends HorizontalScrollView {
+        private final int cardWidth;
+        private ValueAnimator centerAnimator;
+        private boolean centered;
+        GalleryCarouselScroll(Context context, int cardWidth) {
+            super(context); this.cardWidth = cardWidth;
+        }
+        @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            if (getChildCount() == 0 || w <= 0) return;
+            View strip = getChildAt(0);
+            int padding = Math.max(0, (w - cardWidth) / 2);
+            strip.setPadding(padding, 0, padding, 0);
+            if (w != oldw) {
+                centered = false;
+                post(() -> { View focus = strip.findFocus(); if (focus != null) centerOn(focus); });
+            }
+        }
+        // The standard visibility scroll must not fight the explicit centered motion.
+        @Override protected int computeScrollDeltaToGetChildRectOnScreen(Rect rect) { return 0; }
+        void centerOn(View card) {
+            if (getChildCount() == 0 || card.getParent() != getChildAt(0) || getWidth() <= 0) return;
+            View strip = getChildAt(0);
+            int target = card.getLeft() + card.getWidth() / 2 - getWidth() / 2;
+            target = Math.max(0, Math.min(target, Math.max(0, strip.getWidth() - getWidth())));
+            cancelCenter();
+            if (!centered) { centered = true; scrollTo(target, 0); return; }
+            if (target == getScrollX()) return;
+            final ValueAnimator a = ValueAnimator.ofInt(getScrollX(), target);
+            centerAnimator = a;
+            a.setDuration(280L); a.setInterpolator(EASE_MOVE);
+            a.addUpdateListener(v -> scrollTo((Integer) v.getAnimatedValue(), 0));
+            a.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator animation) {
+                    if (centerAnimator == a) centerAnimator = null;
+                }
+            });
+            a.start();
+        }
+        private void cancelCenter() {
+            if (centerAnimator != null) {
+                ValueAnimator old = centerAnimator; centerAnimator = null; old.cancel();
+            }
+        }
+        @Override protected void onDetachedFromWindow() {
+            cancelCenter(); super.onDetachedFromWindow();
+        }
+    }
+
+    private void clearGalleryPreview() {
+        galleryPreviewGeneration++;
+        if (galleryPreviewPending != null) mainHandler.removeCallbacks(galleryPreviewPending);
+        galleryPreviewPending = null;
+        for (ImageView layer : new ImageView[] {galleryPreviewFront, galleryPreviewBack}) if (layer != null) {
+            layer.animate().cancel(); layer.setImageDrawable(null);
+        }
+        galleryPreviewFront = null; galleryPreviewBack = null; galleryInitialFocus = null;
+        galleryName = null; galleryStatus = null; galleryPreviewKey = null;
+    }
+
+    private void showGalleryPreview(String file) {
+        if (galleryName == null || !"background".equals(page)) return;
+        galleryName.setText(BUILTIN.equals(file) ? "Doom" : file.replaceFirst("\\.[^.]+$", ""));
+        galleryStatus.setText(file.equals(selectedWallpaper()) ? "✓ Current background" : "Preview  ·  Press SELECT to apply");
+        if (file.equals(galleryPreviewKey)) return;
+        galleryPreviewKey = file;
+        final int generation = ++galleryPreviewGeneration;
+        if (galleryPreviewPending != null) mainHandler.removeCallbacks(galleryPreviewPending);
+        if (BUILTIN.equals(file)) { displayGalleryPreview(null, generation); return; }
+        // Debounce rapid D-pad repeats. Decode only a bounded 1280px preview off the UI thread.
+        galleryPreviewPending = () -> WALLPAPER_IMAGE_EXECUTOR.execute(() -> {
+            if (generation != galleryPreviewGeneration) return;
+            Bitmap bitmap = null;
+            try {
+                File photo = new File(wallpaperDir(), file);
+                BitmapFactory.Options options = new BitmapFactory.Options(); options.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(photo.getAbsolutePath(), options);
+                options.inSampleSize = 1;
+                while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > 1280) options.inSampleSize *= 2;
+                options.inJustDecodeBounds = false;
+                bitmap = BitmapFactory.decodeFile(photo.getAbsolutePath(), options);
+            } catch (RuntimeException | OutOfMemoryError ignored) { }
+            final Bitmap result = bitmap;
+            mainHandler.post(() -> {
+                if (generation != galleryPreviewGeneration || !"background".equals(page) || galleryPreviewFront == null) {
+                    if (result != null) result.recycle(); return;
+                }
+                if (result != null) displayGalleryPreview(result, generation);
+                else { galleryPreviewKey = null; galleryStatus.setText("Preview unavailable"); }
+            });
+        });
+        mainHandler.postDelayed(galleryPreviewPending, 100L);
+    }
+
+    private void displayGalleryPreview(Bitmap bitmap, int generation) {
+        if (generation != galleryPreviewGeneration || galleryPreviewFront == null) {
+            if (bitmap != null) bitmap.recycle(); return;
+        }
+        ImageView old = galleryPreviewFront, next = galleryPreviewBack;
+        old.animate().cancel(); next.animate().cancel();
+        if (old.getDrawable() != null) old.setAlpha(1f);
+        next.setAlpha(0f);
+        if (bitmap == null) next.setImageResource(R.drawable.doom); else next.setImageBitmap(bitmap);
+        // Keep both images behind the shade, headings and controls, with incoming above outgoing.
+        next.setTranslationZ(0f); old.setTranslationZ(0f);
+        FrameLayout parent = (FrameLayout) next.getParent();
+        parent.removeView(next); parent.addView(next, 1, new FrameLayout.LayoutParams(MATCH, MATCH));
+        galleryPreviewFront = next; galleryPreviewBack = old;
+        next.animate().alpha(1f).setDuration(320L).setInterpolator(EASE_MOVE).withEndAction(() -> {
+            if (galleryPreviewFront == next && galleryPreviewBack == old) {
+                old.setAlpha(0f); old.setImageDrawable(null);
+            }
+        }).start();
     }
 
     private void loadWallpaperThumbnail(ImageView preview, File image) {
@@ -1849,13 +2496,24 @@ public final class Home extends Activity {
         LinearLayout col = new LinearLayout(this); col.setOrientation(LinearLayout.VERTICAL);
         col.setClipChildren(false); col.setClipToPadding(false);
         FrameLayout tileSlot = new FrameLayout(this); tileSlot.setClipChildren(false); tileSlot.setClipToPadding(false);
+        if (card.spotlightEnabled) {
+            // The shadow sits behind the artwork and has its own bounds, so scaling
+            // the card never clips the soft light or changes the row layout.
+            SpotlightHaloView halo = new SpotlightHaloView(this);
+            int haloWidth = homeAppTileWidthPixels() + dp(88);
+            int haloHeight = tileHeight + dp(88);
+            tileSlot.addView(halo, new FrameLayout.LayoutParams(haloWidth, haloHeight, Gravity.CENTER));
+            card.spotlightHalo = halo;
+        }
         tileSlot.addView(card, new FrameLayout.LayoutParams(MATCH, tileHeight, Gravity.CENTER));
         col.addView(tileSlot, new LinearLayout.LayoutParams(MATCH, rowTileHeight));
-        TextView label = text(item.label, 13, 0xFFF4F7FF, Typeface.create("sans-serif-medium", 0));
+        TextView label = text(item.label, 13, 0xFFF4F7FF,
+                Typeface.create(card.spotlightEnabled ? "sans-serif" : "sans-serif-medium", 0));
         label.setGravity(Gravity.CENTER); label.setMaxLines(1); label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         label.setShadowLayer(dp(4), 0, dp(1), 0xAA000000);
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(MATCH, WRAP); llp.topMargin = dp(8);
         col.addView(label, llp);
+        if (card.spotlightEnabled) card.setFloatingLabel(label);
         return col;
     }
 
@@ -1878,24 +2536,50 @@ public final class Home extends Activity {
         } catch (RuntimeException ignored) { return 0xFF1A2438; }
     }
 
-    private final java.util.HashMap<String, Object[]> tileArtCache = new java.util.HashMap<>();
+    // Cache the completed, opaque artwork rather than several separately clipped views.
+    // Limit the retained cache to 8 MiB; visible views own their shader bitmaps.
+    private final LruCache<String, Bitmap> roundedTileCache = new LruCache<String, Bitmap>(8192) {
+        @Override protected int sizeOf(String key, Bitmap bitmap) {
+            return Math.max(1, (bitmap.getByteCount() + 1023) / 1024);
+        }
+    };
+    private final LightingColorFilter[] tileBrightnessFilters = new LightingColorFilter[256];
+
+    private LightingColorFilter tileBrightnessFilter(int brightness) {
+        if (brightness >= 255) return null;
+        LightingColorFilter filter = tileBrightnessFilters[brightness];
+        if (filter == null) {
+            filter = new LightingColorFilter(Color.rgb(brightness, brightness, brightness), 0);
+            tileBrightnessFilters[brightness] = filter;
+        }
+        return filter;
+    }
 
     /** {trimmed art, left edge strip, right edge strip, edge color, aspect} for an app's banner or icon. */
-    private Object[] tileArt(AppItem item) {
-        String key = item.pkg + (item.banner != null ? "#b" : "#i");
-        Object[] hit = tileArtCache.get(key);
-        if (hit != null) return hit;
+    private Object[] tileArt(AppItem item, int targetLongEdge) {
         Drawable d = item.banner != null ? item.banner : item.icon;
         Bitmap art, left, right; int edge = 0xFF1A2438;
         try {
             int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
             if (iw <= 0 || ih <= 0) { iw = 256; ih = 256; }
-            float k = 256f / Math.max(iw, ih);
+            if (d instanceof BitmapDrawable) {
+                Bitmap source = ((BitmapDrawable) d).getBitmap();
+                if (source != null) { iw = source.getWidth(); ih = source.getHeight(); }
+            }
+            // Retain source detail at the largest displayed focus size, without
+            // inventing pixels in a low-resolution source or retaining huge art.
+            float k = Math.min(1f, Math.max(8, targetLongEdge) / (float) Math.max(iw, ih));
             int w = Math.max(8, Math.round(iw * k)), h = Math.max(8, Math.round(ih * k));
             Bitmap full = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
             Drawable.ConstantState cs = d.getConstantState();
             Drawable copy = cs == null ? d : cs.newDrawable().mutate();
-            copy.setBounds(0, 0, w, h); copy.draw(new Canvas(full));
+            if (copy instanceof BitmapDrawable) {
+                ((BitmapDrawable) copy).setFilterBitmap(true);
+                ((BitmapDrawable) copy).setAntiAlias(true);
+            }
+            Rect originalBounds = new Rect(copy.getBounds());
+            try { copy.setBounds(0, 0, w, h); copy.draw(new Canvas(full)); }
+            finally { if (copy == d) copy.setBounds(originalBounds); }
             int[] px = new int[w * h]; full.getPixels(px, 0, w, 0, 0, w, h);
             int minX = w, minY = h, maxX = -1, maxY = -1;
             for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
@@ -1925,9 +2609,99 @@ public final class Home extends Activity {
             art = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888); art.eraseColor(edge);
             left = art; right = art;
         }
-        Object[] out = new Object[] { art, left, right, edge, art.getWidth() / (float) art.getHeight() };
-        tileArtCache.put(key, out);
-        return out;
+        return new Object[] { art, left, right, edge, art.getWidth() / (float) art.getHeight() };
+    }
+
+    private Bitmap composedTileArt(AppItem item, int w, int h) {
+        // The size is bounded to the actual focused tile (at most 512 pixels
+        // along its longest edge). No regeneration occurs on focus changes.
+        float scale = Math.min(SPOTLIGHT_SCALE, 512f / Math.max(w, h));
+        int bw = Math.max(1, Math.round(w * scale));
+        int bh = Math.max(1, Math.round(h * scale));
+        String key = item.pkg + (item.banner != null ? "#b:" : "#i:") + bw + "x" + bh;
+        Bitmap cached = roundedTileCache.get(key);
+        if (cached != null) return cached;
+        Object[] source = tileArt(item, Math.max(bw, bh));
+        Bitmap art = (Bitmap) source[0], left = (Bitmap) source[1], right = (Bitmap) source[2];
+        try {
+            // An opaque composition lets a single rounded draw provide clean
+            // coverage at the edge, rather than stacking several AA masks.
+            Bitmap result = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(result);
+            canvas.drawColor((Integer) source[3]);
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+            RectF rect = new RectF();
+            boolean fillCrop = (Float) source[4] >= 1.45f;
+            if (!fillCrop) {
+                rect.set(0, 0, bw * .5f, bh);
+                canvas.drawBitmap(left, null, rect, paint);
+                rect.set(bw * .5f, 0, bw, bh);
+                canvas.drawBitmap(right, null, rect, paint);
+            }
+            float sx = bw / (float) art.getWidth(), sy = bh / (float) art.getHeight();
+            float fit = fillCrop ? Math.max(sx, sy) : Math.min(sx, sy);
+            float aw = art.getWidth() * fit, ah = art.getHeight() * fit;
+            rect.set((bw - aw) * .5f, (bh - ah) * .5f, (bw + aw) * .5f, (bh + ah) * .5f);
+            canvas.drawBitmap(art, null, rect, paint);
+            // Preserve the two existing subtle lighting gradients, baked once.
+            paint.setShader(new android.graphics.LinearGradient(0, 0, 0, bh,
+                    new int[] { 0x1CFFFFFF, 0x00FFFFFF, 0x00000000, 0x2E000000 }, null, Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, bw, bh, paint);
+            paint.setShader(new android.graphics.LinearGradient(0, 0, 0, bh * .62f,
+                    0x36FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, bw, bh, paint);
+            result.setHasAlpha(false);
+            roundedTileCache.put(key, result);
+            return result;
+        } finally {
+            // These source rasters are private to this composition, never used
+            // by a view or cache. In the fallback they can be the same bitmap.
+            if (left != art) left.recycle();
+            if (right != art && right != left) right.recycle();
+            art.recycle();
+        }
+    }
+
+    private final class RoundedTileArtView extends View {
+        private final AppItem item;
+        private final float radius;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+        private final RectF bounds = new RectF();
+        private int brightness = 255;
+
+        RoundedTileArtView(AppItem item, float radius) {
+            super(Home.this);
+            this.item = item; this.radius = radius;
+            setFocusable(false); setClickable(false);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            bounds.set(0, 0, w, h);
+            if (w <= 0 || h <= 0) { paint.setShader(null); return; }
+            Bitmap bitmap = composedTileArt(item, w, h);
+            BitmapShader shader = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            Matrix matrix = new Matrix();
+            matrix.setScale(w / (float) bitmap.getWidth(), h / (float) bitmap.getHeight());
+            shader.setLocalMatrix(matrix);
+            paint.setShader(shader);
+        }
+
+        void setDim(float dim) {
+            int next = Math.max(0, Math.min(255, Math.round(255f * (1f - dim))));
+            if (next == brightness) return;
+            brightness = next;
+            paint.setColorFilter(tileBrightnessFilter(brightness));
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            if (paint.getShader() == null) return;
+            float corner = Math.min(radius, Math.min(bounds.width(), bounds.height()) * .5f);
+            canvas.drawRoundRect(bounds, corner, corner, paint);
+        }
     }
 
     private GlassCard appCard(AppItem item, int width, int height) {
@@ -1935,39 +2709,10 @@ public final class Home extends Activity {
                 Math.round(height / (2f * getResources().getDisplayMetrics().density))));
         GlassCard card = glass(cornerRadiusDp); card.setAppTile(true); card.setPadding(0, 0, 0, 0);
         card.setAmbientColor(0xFF198BFF);
-        // Artwork keeps its own colors and logo. Transparent padding is trimmed so the icon fills the tile,
-        // and the tile's left/right areas are extended from the icon's own edge pixels so it reads as one surface.
-        Object[] tileArt = tileArt(item);
-        Bitmap artBmp = (Bitmap) tileArt[0], leftStrip = (Bitmap) tileArt[1], rightStrip = (Bitmap) tileArt[2];
-        int edgeColor = (Integer) tileArt[3]; float artAspect = (Float) tileArt[4];
-        final float corner = dp(cornerRadiusDp);
-        FrameLayout art = new FrameLayout(this);
-        art.setOutlineProvider(new android.view.ViewOutlineProvider() {
-            @Override public void getOutline(View view, android.graphics.Outline outline) {
-                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), corner);
-            }
-        });
-        art.setClipToOutline(true);
-        View backdrop = new View(this); backdrop.setBackgroundColor(edgeColor);
-        art.addView(backdrop, new FrameLayout.LayoutParams(MATCH, MATCH));
-        boolean fillCrop = artAspect >= 1.45f;
-        if (!fillCrop) {
-            LinearLayout sides = new LinearLayout(this); sides.setOrientation(LinearLayout.HORIZONTAL);
-            ImageView left = new ImageView(this); left.setScaleType(ImageView.ScaleType.FIT_XY); left.setImageBitmap(leftStrip);
-            ImageView right = new ImageView(this); right.setScaleType(ImageView.ScaleType.FIT_XY); right.setImageBitmap(rightStrip);
-            sides.addView(left, new LinearLayout.LayoutParams(0, MATCH, 1));
-            sides.addView(right, new LinearLayout.LayoutParams(0, MATCH, 1));
-            art.addView(sides, new FrameLayout.LayoutParams(MATCH, MATCH));
-        }
-        ImageView img = new ImageView(this);
-        img.setScaleType(fillCrop ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
-        img.setImageBitmap(artBmp);
-        art.addView(img, new FrameLayout.LayoutParams(MATCH, MATCH));
-        // Subtle finish: soft top highlight and gentle bottom shading for depth.
-        View finish = new View(this);
-        finish.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] { 0x1CFFFFFF, 0x00FFFFFF, 0x00000000, 0x2E000000 }));
-        art.addView(finish, new FrameLayout.LayoutParams(MATCH, MATCH));
+        // Render the entire artwork and its finish with one anti-aliased
+        // rounded rectangle. Avoid hardware outline clipping on older Fire OS.
+        RoundedTileArtView art = new RoundedTileArtView(item, dp(cornerRadiusDp));
+        card.roundedTileArt = art;
         card.addView(art, new FrameLayout.LayoutParams(MATCH, MATCH));
         TextView position = text("", 13, Color.WHITE, Typeface.create("sans-serif-medium", 0));
         position.setTag("main-row-position"); position.setVisibility(View.GONE);
@@ -2277,12 +3022,9 @@ public final class Home extends Activity {
             wallpaperLoadingKey = null;
             wallpaperRenderKey = BUILTIN;
             wallpaperView.setImageResource(R.drawable.doom);
-            Drawable drawable = wallpaperView.getDrawable();
-            Bitmap source = drawable instanceof BitmapDrawable ? ((BitmapDrawable) drawable).getBitmap() : null;
-            prepareWallpaperBlur(source);
             return;
         }
-        if (renderKey.equals(wallpaperRenderKey) && wallpaperView.getDrawable() != null) return;
+        if (renderKey.equals(wallpaperRenderKey) && wallpaperView.getDrawable() != null && wallpaperLoadingKey == null) return;
         if (renderKey.equals(wallpaperLoadingKey)) return;
         final int generation = ++wallpaperImageGeneration;
         wallpaperLoadingKey = renderKey;
@@ -2315,60 +3057,21 @@ public final class Home extends Activity {
                     wallpaperRenderKey = requestedKey;
                     wallpaperView.setImageBitmap(selected);
                 }
-                Drawable drawable = wallpaperView.getDrawable();
-                Bitmap source = drawable instanceof BitmapDrawable ? ((BitmapDrawable) drawable).getBitmap() : null;
-                prepareWallpaperBlur(source);
-            });
-        });
-    }
-
-    private void prepareWallpaperBlur(Bitmap source) {
-        final int generation = ++wallpaperBlurGeneration;
-        wallpaperBlurAmount = 0f;
-        if (wallpaperBlurView == null) return;
-        wallpaperBlurView.setImageDrawable(null);
-        wallpaperBlurView.setAlpha(0f);
-        if (source == null) return;
-        WALLPAPER_BLUR_EXECUTOR.execute(() -> {
-            Bitmap soft = null;
-            try {
-                int width = Math.min(360, source.getWidth());
-                int height = Math.max(1, Math.round(source.getHeight() * (width / (float) source.getWidth())));
-                soft = Bitmap.createScaledBitmap(source, width, height, true);
-                if (soft == source) soft = source.copy(Bitmap.Config.ARGB_8888, true);
-                boxBlur(soft, 2);
-            } catch (RuntimeException | OutOfMemoryError ignored) {
-                if (soft != null && soft != source && !soft.isRecycled()) soft.recycle();
-                soft = null;
-            }
-            final Bitmap result = soft;
-            if (result == null) return;
-            mainHandler.post(() -> {
-                if (generation != wallpaperBlurGeneration || wallpaperBlurView == null) {
-                    if (!result.isRecycled()) result.recycle();
-                    return;
-                }
-                wallpaperBlurView.setImageBitmap(result);
-                wallpaperBlurView.setAlpha(wallpaperBlurAmount);
             });
         });
     }
 
     private void applyWallpaperMotion(float fraction) {
         float f = Math.max(0f, Math.min(1f, fraction));
-        wallpaperBlurAmount = .18f * f;
-        float scale = 1f + .13f * f;
-        float parallaxY = -dp(4f) * f;
         if (wallpaperView != null) {
-            wallpaperView.setScaleX(scale); wallpaperView.setScaleY(scale);
-            wallpaperView.setTranslationY(parallaxY);
+            wallpaperView.animate().cancel();
+            float scale = 1f + (ALL_APPS_WALLPAPER_ZOOM - 1f) * f;
+            wallpaperView.setScaleX(scale); wallpaperView.setScaleY(scale); wallpaperView.setTranslationY(0f);
         }
-        if (wallpaperBlurView != null) {
-            wallpaperBlurView.setScaleX(scale); wallpaperBlurView.setScaleY(scale);
-            wallpaperBlurView.setTranslationY(parallaxY);
-            wallpaperBlurView.setAlpha(wallpaperBlurAmount);
+        if (wallpaperTransitionShade != null) {
+            wallpaperTransitionShade.animate().cancel();
+            wallpaperTransitionShade.setAlpha(ALL_APPS_WALLPAPER_SHADE * f);
         }
-        if (wallpaperTransitionShade != null) wallpaperTransitionShade.setAlpha(.065f * f);
     }
 
     private Bitmap decodeImage(File file, int targetWidth, int targetHeight) {
@@ -2424,15 +3127,25 @@ public final class Home extends Activity {
         View hero = ((ViewGroup) content).getChildAt(0);
         if (!(hero instanceof LinearLayout)) return;
         float scale = 1f - (1f - HOME_HERO_COMPACT_SCALE) * homeHeroCollapseFraction;
-        hero.setTranslationY(scrollY);
+        hero.setTranslationY(scrollY - dpF(5f) * homeHeroCollapseFraction);
         if (homeViewportAnimator == null) {
             hero.setScaleX(scale); hero.setScaleY(scale);
-            hero.setAlpha(homeChromeAutoHide ? 1f - homeHeroCollapseFraction : 1f);
+            hero.setAlpha(homeHeroAlpha(homeHeroCollapseFraction));
+            if (homeGreetingView != null) homeGreetingView.setAlpha(homeGreetingAlpha(homeHeroCollapseFraction));
             applyNavScale(homeHeroCollapseFraction);
         }
     }
 
-    /** Top icons shrink and grow with the same value as the clock and greeting (no separate timer). */
+    private float homeHeroAlpha(float fraction) {
+        // Preserve the existing auto-hide rule for larger app libraries.
+        return 1f - (1f - (homeChromeAutoHide ? 0f : HOME_HERO_COMPACT_ALPHA)) * fraction;
+    }
+
+    private float homeGreetingAlpha(float fraction) {
+        return 1f - (1f - HOME_GREETING_COMPACT_ALPHA) * fraction;
+    }
+
+    /** Top icons retain their normal eased resize during viewport navigation. */
     private void applyNavScale(float fraction) {
         if (floatingNav == null) return;
         float s = 1f - (1f - navCompactSize / (float) navExpandedSize) * fraction;
@@ -2611,7 +3324,7 @@ public final class Home extends Activity {
             cancelGlide();
             final ValueAnimator a = ValueAnimator.ofInt(from, target);
             focusGlide = a;
-            a.setDuration(Math.min(240L, 130L + Math.round(Math.abs(target - from) * .12f)));
+            a.setDuration(Math.min(160L, 80L + Math.round(Math.abs(target - from) * .10f)));
             a.setInterpolator(EASE_MOVE);
             a.addUpdateListener(v -> scrollTo(0, (Integer) v.getAnimatedValue()));
             a.addListener(new AnimatorListenerAdapter() {
@@ -2726,6 +3439,29 @@ public final class Home extends Activity {
         }
     }
 
+    /** Cached neutral contact shadow, drawn only behind focused app artwork. */
+    private static final class SpotlightHaloView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        SpotlightHaloView(Context context) {
+            super(context);
+            setFocusable(false);
+            setClickable(false);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            setAlpha(0f);
+            paint.setShader(new android.graphics.RadialGradient(0f, 0f, 1f,
+                    new int[] {0x80000000, 0x55000000, 0x20000000, 0x00000000},
+                    new float[] {0f, .48f, .78f, 1f}, android.graphics.Shader.TileMode.CLAMP));
+        }
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            canvas.save();
+            canvas.translate(getWidth() * .5f, getHeight() * .58f);
+            canvas.scale(getWidth() * .48f, getHeight() * .42f);
+            canvas.drawCircle(0f, 0f, 1f, paint);
+            canvas.restore();
+        }
+    }
+
     private final class GlassCard extends FrameLayout {
         private final GradientDrawable idle = round(0x50101F3A, dp(18));
         private final GradientDrawable activeBg = round(0x74335D97, dp(18));
@@ -2737,6 +3473,19 @@ public final class Home extends Activity {
         private final GradientDrawable blueFocus = round(0x553F6FA8, dp(25));
         private boolean floatingStyle;
         private boolean appTile;
+        private boolean spotlightEnabled;
+        private SpotlightHaloView spotlightHalo;
+        private TextView floatingLabel;
+        private RoundedTileArtView roundedTileArt;
+        private ValueAnimator spotlightAnimator;
+        private int spotlightTarget;
+        private float spotlightDim, spotlightGlow;
+        private View counterflowCell;
+        private float counterflowTargetY;
+        private View orbitCell;
+        private float orbitTargetRotation, orbitTargetY;
+        private final Paint navFocusPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint spotlightDimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final int radius;
         private boolean focused, active;
         private int ambientColor = 0xFF258BFF;
@@ -2765,6 +3514,178 @@ public final class Home extends Activity {
                 refreshFocusEffectColor();
             }
         }
+        void setSpotlightEnabled(boolean value) {
+            spotlightEnabled = value;
+            if (value) {
+                setEdgeFocused(false);
+                // Fire OS 6 may add its own focus highlight; use the spotlight alone.
+                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    try { View.class.getMethod("setDefaultFocusHighlightEnabled", boolean.class).invoke(this, false); }
+                    catch (Exception ignored) { }
+                }
+            }
+        }
+
+        void setFloatingLabel(TextView label) {
+            floatingLabel = label;
+            // Retain measured label space and original typography.
+            label.setAlpha(spotlightTarget > 0 ? 1f : 0f);
+            label.setTranslationY(spotlightTarget > 0 ? 0f : dpF(4f));
+        }
+
+        boolean isSpotlightEntering() {
+            return spotlightTarget == 1 && spotlightAnimator != null && spotlightAnimator.isStarted();
+        }
+
+        /** State: 1 = focused, -1 = dimmed neighbour, 0 = focus outside the group. */
+        void animateSpotlight(int target, View cell) {
+            if (!spotlightEnabled) return;
+            if (spotlightTarget == target && counterflowCell == cell) return;
+            // Capture the previous target before retargeting. Only a tile
+            // losing focus dips; a subsequent focus gain starts at its
+            // actual rendered position, including an interrupted dip.
+            final boolean departing = cell != null && spotlightTarget > 0 && target <= 0;
+            final float lift = cell != null && target > 0 ? -dpF(COUNTERFLOW_LIFT_DP) : 0f;
+            spotlightTarget = target;
+            counterflowCell = cell;
+            counterflowTargetY = lift;
+            if (spotlightAnimator != null) { spotlightAnimator.cancel(); spotlightAnimator = null; }
+            animate().cancel();
+            final float startScale = getScaleX(), startDim = spotlightDim, startGlow = spotlightGlow;
+            final float endScale = spotlightScaleFor(target);
+            final float endDim = spotlightDimFor(target);
+            final float endGlow = target > 0 ? 1f : 0f;
+            final float startLift = cell == null ? 0f : cell.getTranslationY();
+            final float dip = dpF(COUNTERFLOW_DIP_DP);
+            final float labelStartAlpha = floatingLabel == null ? 0f : floatingLabel.getAlpha();
+            final float labelStartY = floatingLabel == null ? 0f : floatingLabel.getTranslationY();
+            final float labelEndAlpha = target > 0 ? 1f : 0f;
+            final float labelEndY = target > 0 ? 0f : dpF(4f);
+            if (reduceMotionEnabled()) {
+                applySpotlight(endScale, endDim, endGlow);
+                applyCounterflow(lift);
+                applyFloatingLabel(labelEndAlpha, labelEndY);
+                return;
+            }
+            final ValueAnimator motion = ValueAnimator.ofFloat(0f, 1f);
+            spotlightAnimator = motion;
+            motion.setDuration(spotlightRepeatDispatch ? SPOTLIGHT_REPEAT_MS
+                    : floatingStyle ? NAV_SPOTLIGHT_MS : SPOTLIGHT_MS);
+            motion.setInterpolator(EASE_MOVE);
+            motion.addUpdateListener(a -> {
+                float t = (Float) a.getAnimatedValue();
+                applySpotlight(startScale + (endScale - startScale) * t,
+                        startDim + (endDim - startDim) * t, startGlow + (endGlow - startGlow) * t);
+                float position = startLift + (lift - startLift) * t;
+                if (departing) {
+                    // Two smooth segments, with a brief downward overshoot
+                    // before settling exactly onto the original baseline.
+                    if (t < COUNTERFLOW_DIP_PEAK) {
+                        float u = t / COUNTERFLOW_DIP_PEAK;
+                        u = u * u * (3f - 2f * u);
+                        position = startLift + (dip - startLift) * u;
+                    } else {
+                        float u = (t - COUNTERFLOW_DIP_PEAK) / (1f - COUNTERFLOW_DIP_PEAK);
+                        u = u * u * (3f - 2f * u);
+                        position = dip * (1f - u);
+                    }
+                }
+                applyCounterflow(position);
+                applyFloatingLabel(labelStartAlpha + (labelEndAlpha - labelStartAlpha) * t,
+                        labelStartY + (labelEndY - labelStartY) * t);
+            });
+            motion.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator animation) {
+                    if (spotlightAnimator == motion) spotlightAnimator = null;
+                }
+            });
+            motion.start();
+        }
+
+        void animateOrbitSpotlight(int target, View cell, float rotation, float lift) {
+            if (!spotlightEnabled) return;
+            if (spotlightTarget == target && orbitCell == cell
+                    && orbitTargetRotation == rotation && orbitTargetY == lift) return;
+            spotlightTarget = target;
+            orbitCell = cell;
+            orbitTargetRotation = rotation;
+            orbitTargetY = lift;
+            if (cell != null) cell.setCameraDistance(dpF(900f));
+            if (spotlightAnimator != null) { spotlightAnimator.cancel(); spotlightAnimator = null; }
+            animate().cancel();
+            final float startScale = getScaleX(), startDim = spotlightDim, startGlow = spotlightGlow;
+            final float endScale = spotlightScaleFor(target);
+            final float endDim = spotlightDimFor(target);
+            final float endGlow = target > 0 ? 1f : 0f;
+            final float startRotation = cell == null ? 0f : cell.getRotationY();
+            final float startLift = cell == null ? 0f : cell.getTranslationY();
+            final float labelStartAlpha = floatingLabel == null ? 0f : floatingLabel.getAlpha();
+            final float labelStartY = floatingLabel == null ? 0f : floatingLabel.getTranslationY();
+            final float labelEndAlpha = target > 0 ? 1f : 0f;
+            final float labelEndY = target > 0 ? 0f : dpF(4f);
+            if (reduceMotionEnabled()) {
+                applySpotlight(endScale, endDim, endGlow);
+                applyOrbit(rotation, lift);
+                applyFloatingLabel(labelEndAlpha, labelEndY);
+                return;
+            }
+            final ValueAnimator motion = ValueAnimator.ofFloat(0f, 1f);
+            spotlightAnimator = motion;
+            motion.setDuration(spotlightRepeatDispatch ? SPOTLIGHT_REPEAT_MS
+                    : floatingStyle ? NAV_SPOTLIGHT_MS : SPOTLIGHT_MS);
+            motion.setInterpolator(EASE_MOVE);
+            motion.addUpdateListener(a -> {
+                float t = (Float) a.getAnimatedValue();
+                applySpotlight(startScale + (endScale - startScale) * t,
+                        startDim + (endDim - startDim) * t, startGlow + (endGlow - startGlow) * t);
+                applyOrbit(startRotation + (rotation - startRotation) * t,
+                        startLift + (lift - startLift) * t);
+                applyFloatingLabel(labelStartAlpha + (labelEndAlpha - labelStartAlpha) * t,
+                        labelStartY + (labelEndY - labelStartY) * t);
+            });
+            motion.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator animation) {
+                    if (spotlightAnimator == motion) spotlightAnimator = null;
+                }
+            });
+            motion.start();
+        }
+
+        private void applyOrbit(float rotation, float lift) {
+            if (orbitCell == null) return;
+            orbitCell.setRotationY(rotation);
+            orbitCell.setTranslationY(lift);
+        }
+
+        private void applyCounterflow(float lift) {
+            if (counterflowCell != null) counterflowCell.setTranslationY(lift);
+        }
+
+        private float spotlightScaleFor(int target) {
+            return floatingStyle ? 1f : target > 0 ? SPOTLIGHT_SCALE : target < 0 ? SPOTLIGHT_DIM_SCALE : 1f;
+        }
+
+        private float spotlightDimFor(int target) {
+            return floatingStyle ? (target > 0 ? 0f : .68f) : target < 0 ? SPOTLIGHT_DIM_AMOUNT : 0f;
+        }
+
+        private void applySpotlight(float scale, float dim, float glow) {
+            setScaleX(scale); setScaleY(scale);
+            spotlightDim = dim; spotlightGlow = glow;
+            if (roundedTileArt != null) roundedTileArt.setDim(dim);
+            // Top-icon spotlight uses opacity, never a rectangular dark overlay
+            // or an app-sized halo. The button and glyph dimensions stay fixed.
+            if (floatingStyle) setAlpha(1f - dim);
+            if (spotlightHalo != null) spotlightHalo.setAlpha(glow);
+            invalidate();
+        }
+
+        private void applyFloatingLabel(float alpha, float translationY) {
+            if (floatingLabel == null) return;
+            floatingLabel.setAlpha(alpha);
+            floatingLabel.setTranslationY(translationY);
+        }
+
         void refreshFocusEffectColor() { focusEffectColor = getFocusEffectColor(); invalidate(); }
         private int getBrighterFocusEffectColor() {
             final float lift = .14f;
@@ -2781,16 +3702,13 @@ public final class Home extends Activity {
             return Color.argb(alpha, 0, 0, 0);
         }
         void setAmbientColor(int color) { ambientColor = color; if (focused && ambientGlow != null) ambientGlow.setFocus(color, this); }
-        void setFloatingStyle(boolean enabled) { floatingStyle = enabled; if (enabled) { blueIdle.setCornerRadius(radius); blueActive.setCornerRadius(radius); blueFocus.setCornerRadius(radius); blueIdle.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM); blueIdle.setColors(new int[] { 0x40F2F8FF, 0x1CD6E6FF });
-            blueActive.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM); blueActive.setColors(new int[] { 0x5CF2F8FF, 0x30D6E6FF });
+        void setFloatingStyle(boolean enabled) { floatingStyle = enabled; if (enabled) { blueIdle.setCornerRadius(radius); blueActive.setCornerRadius(radius); blueFocus.setCornerRadius(radius); blueIdle.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM); blueIdle.setColors(new int[] { 0x36F4F7FC, 0x1A171D29 });
+            blueActive.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM); blueActive.setColors(new int[] { 0x52F4F7FC, 0x33171D29 });
             blueFocus.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM); blueFocus.setColors(new int[] { 0x6AFFFFFF, 0x38E0EDFF });
             setBackground(blueIdle); setElevation(0);
-            setForeground(null); setStateListAnimator(null); setClipToOutline(false); setWillNotDraw(false);
+            setForeground(null); setStateListAnimator(null); setClipToOutline(true); setWillNotDraw(false);
             refreshFocusEffectColor();
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
-                try { View.class.getMethod("setDefaultFocusHighlightEnabled", boolean.class).invoke(this, false); }
-                catch (Exception ignored) { }
-            }
+            disablePlatformFocusHighlight(this);
             setOutlineProvider(new android.view.ViewOutlineProvider() {
                 @Override public void getOutline(View v, android.graphics.Outline outline) { outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), Math.min(v.getWidth(), v.getHeight()) / 2f); }
             });
@@ -2803,6 +3721,20 @@ public final class Home extends Activity {
                 focused = hasFocus; setBackground(appTile ? null : floatingStyle
                         ? (active ? blueActive : blueIdle)
                         : (focused ? focusedBg : active ? activeBg : idle));
+                if (spotlightEnabled) {
+                    final List<GlassCard> group = spotlightGroup(this);
+                    if (hasFocus) updateSpotlightGroup(group, this);
+                    else if (group != null) {
+                        // Focus loss precedes gain on D-pad moves. Defer only the
+                        // group-exit check to avoid flashing all tiles bright.
+                        mainHandler.post(() -> {
+                            if (spotlightGroup(this) != group) return;
+                            if (indexOfCard(group, getCurrentFocus()) < 0)
+                                updateSpotlightGroup(group, null);
+                        });
+                    }
+                    return;
+                }
                 animate().cancel();
                 float z = appTile ? (hasFocus ? dp(5) : 0f) : floatingStyle ? 0f : dp(hasFocus ? 14 : 3);
                 long focusDuration = appTile
@@ -2810,7 +3742,8 @@ public final class Home extends Activity {
                         : (hasFocus ? MOTION_FOCUS_IN_MS : MOTION_FOCUS_OUT_MS);
                 android.view.animation.Interpolator focusCurve = appTile
                         ? EASE_MOVE : (hasFocus ? EASE_OUT : EASE_MOVE);
-                animate().scaleX(hasFocus ? 1.08f : 1f).scaleY(hasFocus ? 1.08f : 1f).translationZ(z)
+                float focusedScale = appTile ? 1.04f : 1.08f;
+                animate().scaleX(hasFocus ? focusedScale : 1f).scaleY(hasFocus ? focusedScale : 1f).translationZ(z)
                         .setInterpolator(focusCurve).setDuration(focusDuration).start();
                 if (!appTile && ambientGlow != null) ambientGlow.setFocus(hasFocus ? ambientColor : 0, hasFocus ? this : null);
                 if (floatingStyle) animateFocusMix(hasFocus);
@@ -2850,11 +3783,26 @@ public final class Home extends Activity {
         @Override protected void dispatchDraw(android.graphics.Canvas canvas) {
             android.graphics.Paint p = drawPaint;
             super.dispatchDraw(canvas);
-            if (sheenShader == null) sheenShader = new android.graphics.LinearGradient(0, 0, 0, getHeight() * .62f, 0x36FFFFFF, 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP);
-            p.setStyle(Paint.Style.FILL); p.setShader(sheenShader);
             android.graphics.RectF r = drawRect; r.set(0, 0, getWidth(), getHeight());
-            canvas.drawRoundRect(r, radius, radius, p); p.setShader(null);
-            if (floatingStyle) drawGlassRim(canvas, r);
+            if (roundedTileArt == null) {
+                if (sheenShader == null) sheenShader = new android.graphics.LinearGradient(0, 0, 0, getHeight() * .62f, 0x36FFFFFF, 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP);
+                p.setStyle(Paint.Style.FILL); p.setShader(sheenShader);
+                canvas.drawRoundRect(r, radius, radius, p); p.setShader(null);
+            }
+            if (floatingStyle) {
+                drawGlassRim(canvas, r);
+                if (spotlightEnabled && spotlightGlow > 0f) {
+                    float cx = getWidth() * .5f, cy = getHeight() * .5f;
+                    float cr = Math.min(cx, cy);
+                    navFocusPaint.setStyle(Paint.Style.FILL);
+                    navFocusPaint.setColor(Color.argb(Math.round(36f * spotlightGlow), 255, 255, 255));
+                    canvas.drawCircle(cx, cy, cr - dpF(1f), navFocusPaint);
+                    navFocusPaint.setStyle(Paint.Style.STROKE);
+                    navFocusPaint.setStrokeWidth(dpF(1.35f));
+                    navFocusPaint.setColor(Color.argb(Math.round(105f * spotlightGlow), 245, 248, 255));
+                    canvas.drawCircle(cx, cy, Math.max(0f, cr - dpF(1.15f)), navFocusPaint);
+                }
+            }
             if (!appTile && !floatingStyle) {
                 p.setStyle(android.graphics.Paint.Style.STROKE); p.setStrokeWidth(dp(floatingStyle ? (focused ? 2.2f : active ? 1.5f : .9f) : (focused ? 2.4f : active ? 1.2f : .8f)));
                 p.setColor(floatingStyle ? (focused ? 0x81C9E7FF : active ? 0xB477C5FF : 0x664E83B0)
@@ -2870,7 +3818,14 @@ public final class Home extends Activity {
                     ringRect.set(-g, -g, getWidth() + g, getHeight() + g); canvas.drawRoundRect(ringRect, radius + g, radius + g, p);
                 }
             }
-            drawEdgeSweep(canvas);
+            if (spotlightEnabled) {
+                // A black overlay multiplies the finished artwork's RGB values;
+                // unlike view alpha, it does not let the wallpaper show through.
+                if (!floatingStyle && roundedTileArt == null && spotlightDim > 0f) {
+                    spotlightDimPaint.setColor(Color.argb(Math.round(255f * spotlightDim), 0, 0, 0));
+                    canvas.drawRoundRect(r, radius, radius, spotlightDimPaint);
+                }
+            } else drawEdgeSweep(canvas);
         }
 
         /** Liquid-glass finish: a specular rim that is bright top-left and bottom-right, plus soft light along the lower edge. */
@@ -2956,7 +3911,7 @@ public final class Home extends Activity {
 
             // Two bright dashes travel counter-clockwise around the rounded path.
             // Layered strokes create a soft neon halo without covering app artwork.
-            float dashLength = edgePathLength * .308f; // 40% longer than the previous 22% segment
+            float dashLength = edgePathLength * .4004f; // 30% longer than the previous 30.8% segment
             float travel = (1f - edgePhase) * edgePathLength;
             for (int segment = 0; segment < 2; segment++) {
                 float start = (travel + segment * edgePathLength * .5f) % edgePathLength;
@@ -3017,6 +3972,15 @@ public final class Home extends Activity {
 
         @Override protected void onDetachedFromWindow() {
             if (edgeAnimator != null) { edgeAnimator.cancel(); edgeAnimator = null; }
+            if (spotlightAnimator != null) {
+                spotlightAnimator.cancel(); spotlightAnimator = null;
+                applySpotlight(spotlightScaleFor(spotlightTarget), spotlightDimFor(spotlightTarget),
+                        spotlightTarget > 0 ? 1f : 0f);
+                if (isClassicAnimationProfile()) applyOrbit(orbitTargetRotation, orbitTargetY);
+                else applyCounterflow(counterflowTargetY);
+                applyFloatingLabel(spotlightTarget > 0 ? 1f : 0f,
+                        spotlightTarget > 0 ? 0f : dpF(4f));
+            }
             super.onDetachedFromWindow();
         }
     }
